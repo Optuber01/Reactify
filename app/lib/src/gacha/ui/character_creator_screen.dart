@@ -103,6 +103,39 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
   bool _isPlaying = false;
   final List<double> _keyframes = [0.0, 1.0, 2.0, 3.0];
 
+  final Map<String, List<GachaKeyframe>> _animationTracks = {
+    'head': [
+      const GachaKeyframe(time: 0.0, position: Offset.zero, scale: Offset(1, 1), angle: 0.0),
+      const GachaKeyframe(time: 1.0, position: Offset.zero, scale: Offset(1, 1), angle: -10.0),
+      const GachaKeyframe(time: 2.0, position: Offset.zero, scale: Offset(1, 1), angle: 10.0),
+      const GachaKeyframe(time: 3.0, position: Offset.zero, scale: Offset(1, 1), angle: 0.0),
+    ],
+    'shoulder_front': [
+      const GachaKeyframe(time: 0.0, position: Offset.zero, scale: Offset(1, 1), angle: 0.0),
+      const GachaKeyframe(time: 1.0, position: Offset.zero, scale: Offset(1, 1), angle: 15.0),
+      const GachaKeyframe(time: 2.0, position: Offset.zero, scale: Offset(1, 1), angle: -15.0),
+      const GachaKeyframe(time: 3.0, position: Offset.zero, scale: Offset(1, 1), angle: 0.0),
+    ],
+    'shoulder_back': [
+      const GachaKeyframe(time: 0.0, position: Offset.zero, scale: Offset(1, 1), angle: 0.0),
+      const GachaKeyframe(time: 1.0, position: Offset.zero, scale: Offset(1, 1), angle: -15.0),
+      const GachaKeyframe(time: 2.0, position: Offset.zero, scale: Offset(1, 1), angle: 15.0),
+      const GachaKeyframe(time: 3.0, position: Offset.zero, scale: Offset(1, 1), angle: 0.0),
+    ],
+    'thigh_front': [
+      const GachaKeyframe(time: 0.0, position: Offset.zero, scale: Offset(1, 1), angle: 0.0),
+      const GachaKeyframe(time: 1.0, position: Offset.zero, scale: Offset(1, 1), angle: 8.0),
+      const GachaKeyframe(time: 2.0, position: Offset.zero, scale: Offset(1, 1), angle: -8.0),
+      const GachaKeyframe(time: 3.0, position: Offset.zero, scale: Offset(1, 1), angle: 0.0),
+    ],
+    'thigh_back': [
+      const GachaKeyframe(time: 0.0, position: Offset.zero, scale: Offset(1, 1), angle: 0.0),
+      const GachaKeyframe(time: 1.0, position: Offset.zero, scale: Offset(1, 1), angle: -8.0),
+      const GachaKeyframe(time: 2.0, position: Offset.zero, scale: Offset(1, 1), angle: 8.0),
+      const GachaKeyframe(time: 3.0, position: Offset.zero, scale: Offset(1, 1), angle: 0.0),
+    ],
+  };
+
   @override
   void initState() {
     super.initState();
@@ -130,16 +163,31 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
     while (_isPlaying && mounted) {
       await Future.delayed(const Duration(milliseconds: 33));
       if (!_isPlaying || !mounted) break;
+      
+      final nextTime = _currentTime + 0.033;
+      final time = nextTime >= _maxDuration ? 0.0 : nextTime;
+
+      // Update Gacha joints and child part local propagation natively
+      _game.updateAnimations(time, _animationTracks);
+      final currentState = _currentState;
+      final scene = _scene;
+      if (currentState != null && scene != null) {
+        _game.updateScene(scene, currentState, widget.tables);
+      }
+
       setState(() {
-        _currentTime += 0.033;
-        if (_currentTime >= _maxDuration) {
-          _currentTime = 0.0;
-        }
+        _currentTime = time;
       });
     }
   }
 
   void _onTimeChanged(double time) {
+    _game.updateAnimations(time, _animationTracks);
+    final currentState = _currentState;
+    final scene = _scene;
+    if (currentState != null && scene != null) {
+      _game.updateScene(scene, currentState, widget.tables);
+    }
     setState(() {
       _currentTime = time;
     });
@@ -157,10 +205,19 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
   }
 
   void _handleStrokesDrawn(List<Offset> stroke) {
-    setState(() {
-      _messageText = 'Captured custom drawing stroke with ${stroke.length} simplified control points!';
-      _messageIsError = false;
-    });
+    try {
+      final headJoint = _game.descendants().whereType<GachaJointComponent>().firstWhere((j) => j.name == 'head');
+      headJoint.addDrawingStroke(stroke);
+      setState(() {
+        _messageText = 'Rigged vector stroke with ${stroke.length} points directly onto the head joint!';
+        _messageIsError = false;
+      });
+    } catch (e) {
+      setState(() {
+        _messageText = 'Captured stroke with ${stroke.length} points, but failed to rig onto head joint: $e';
+        _messageIsError = true;
+      });
+    }
   }
 
   @override
@@ -273,6 +330,7 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
                       selectedField: _selectedField,
                       onImportPressed: _importFromTextarea,
                       onExportPressed: _exportCurrentState,
+                      onExportVideoPressed: _exportVideo,
                       onResetToFixturePressed: _resetToSelectedFixture,
                       onResetToBaselinePressed: _resetToBaseline,
                       onNumericFieldChanged: _updateNumericField,
@@ -367,6 +425,45 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
           'Exported the current 445-field code to the editor buffer.';
       _messageIsError = false;
     });
+  }
+
+  Future<void> _exportVideo() async {
+    final scene = _scene;
+    final currentState = _currentState;
+    if (scene == null || currentState == null) {
+      setState(() {
+        _messageText = 'Failed to export video: scene or state is not loaded.';
+        _messageIsError = true;
+      });
+      return;
+    }
+    setState(() {
+      _sceneLoading = true;
+      _messageText = 'Rendering rigged keyframe animation frame-by-frame...';
+      _messageIsError = false;
+    });
+    try {
+      final path = await VideoExportManager.exportScene(
+        scene: scene,
+        state: currentState,
+        tables: widget.tables,
+        animationTracks: _animationTracks,
+        outputFileName: 'gacha_anim_${DateTime.now().millisecondsSinceEpoch}.mp4',
+        width: 720,
+        height: 1280,
+      );
+      setState(() {
+        _sceneLoading = false;
+        _messageText = 'Video exported successfully to: $path';
+        _messageIsError = false;
+      });
+    } catch (e) {
+      setState(() {
+        _sceneLoading = false;
+        _messageText = 'Failed to export video: $e';
+        _messageIsError = true;
+      });
+    }
   }
 
   Future<void> _resetToBaseline() async {
@@ -503,6 +600,8 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
         _scene = scene;
         _sceneLoading = false;
       });
+      _game.updateAnimations(_currentTime, _animationTracks);
+      _game.updateScene(scene, next, widget.tables);
     } catch (error) {
       if (!mounted || serial != _renderSerial) {
         return;
@@ -803,6 +902,7 @@ class _EditorInspector extends StatelessWidget {
     required this.selectedField,
     required this.onImportPressed,
     required this.onExportPressed,
+    required this.onExportVideoPressed,
     required this.onResetToFixturePressed,
     required this.onResetToBaselinePressed,
     required this.onNumericFieldChanged,
@@ -826,6 +926,7 @@ class _EditorInspector extends StatelessWidget {
   final String? selectedField;
   final VoidCallback onImportPressed;
   final VoidCallback onExportPressed;
+  final VoidCallback onExportVideoPressed;
   final VoidCallback onResetToFixturePressed;
   final VoidCallback onResetToBaselinePressed;
   final Future<void> Function(String field, int value) onNumericFieldChanged;
@@ -882,6 +983,11 @@ class _EditorInspector extends StatelessWidget {
                     OutlinedButton(
                       onPressed: onExportPressed,
                       child: const Text('Export To Buffer'),
+                    ),
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.video_library),
+                      onPressed: onExportVideoPressed,
+                      label: const Text('Export Video (MP4)'),
                     ),
                     OutlinedButton(
                       onPressed: onResetToFixturePressed,

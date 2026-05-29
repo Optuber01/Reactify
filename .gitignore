@@ -25,7 +25,7 @@
 /app/*.iml
 
 # 4. Explicitly ignore all tools, research, docs, and agentic files
-/agent.md
+/agents.md
 /tools/
 /docs/
 /thoughts/

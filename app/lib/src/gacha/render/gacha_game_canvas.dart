@@ -25,8 +25,13 @@ class GachaGameCanvas extends FlameGame {
   AffineMatrix headWorld = const AffineMatrix.identity();
   AffineMatrix shoulderFrontWorld = const AffineMatrix.identity();
   AffineMatrix shoulderBackWorld = const AffineMatrix.identity();
+  AffineMatrix forearmFrontWorld = const AffineMatrix.identity();
+  AffineMatrix forearmBackWorld = const AffineMatrix.identity();
+  AffineMatrix hipWorld = const AffineMatrix.identity();
   AffineMatrix thighFrontWorld = const AffineMatrix.identity();
   AffineMatrix thighBackWorld = const AffineMatrix.identity();
+  AffineMatrix feetFrontWorld = const AffineMatrix.identity();
+  AffineMatrix feetBackWorld = const AffineMatrix.identity();
 
   // Animation tween offsets
   final Map<String, double> jointRotationTweens = {};
@@ -52,24 +57,39 @@ class GachaGameCanvas extends FlameGame {
       final head = GachaJointComponent(name: 'head');
       final shoulderFront = GachaJointComponent(name: 'shoulder_front');
       final shoulderBack = GachaJointComponent(name: 'shoulder_back');
+      final forearmFront = GachaJointComponent(name: 'forearm_front');
+      final forearmBack = GachaJointComponent(name: 'forearm_back');
+      final hip = GachaJointComponent(name: 'hip');
       final thighFront = GachaJointComponent(name: 'thigh_front');
       final thighBack = GachaJointComponent(name: 'thigh_back');
+      final feetFront = GachaJointComponent(name: 'feet_front');
+      final feetBack = GachaJointComponent(name: 'feet_back');
 
       root.add(torso);
       torso.add(head);
       torso.add(shoulderFront);
       torso.add(shoulderBack);
-      torso.add(thighFront);
-      torso.add(thighBack);
+      shoulderFront.add(forearmFront);
+      shoulderBack.add(forearmBack);
+      torso.add(hip);
+      hip.add(thighFront);
+      hip.add(thighBack);
+      thighFront.add(feetFront);
+      thighBack.add(feetBack);
     }
 
     final root = _rootComponent!;
-    final torso = root.children.whereType<GachaJointComponent>().firstWhere((j) => j.name == 'torso');
-    final head = torso.children.whereType<GachaJointComponent>().firstWhere((j) => j.name == 'head');
-    final shoulderFront = torso.children.whereType<GachaJointComponent>().firstWhere((j) => j.name == 'shoulder_front');
-    final shoulderBack = torso.children.whereType<GachaJointComponent>().firstWhere((j) => j.name == 'shoulder_back');
-    final thighFront = torso.children.whereType<GachaJointComponent>().firstWhere((j) => j.name == 'thigh_front');
-    final thighBack = torso.children.whereType<GachaJointComponent>().firstWhere((j) => j.name == 'thigh_back');
+    final torso = root.descendants().whereType<GachaJointComponent>().firstWhere((j) => j.name == 'torso');
+    final head = root.descendants().whereType<GachaJointComponent>().firstWhere((j) => j.name == 'head');
+    final shoulderFront = root.descendants().whereType<GachaJointComponent>().firstWhere((j) => j.name == 'shoulder_front');
+    final shoulderBack = root.descendants().whereType<GachaJointComponent>().firstWhere((j) => j.name == 'shoulder_back');
+    final forearmFront = root.descendants().whereType<GachaJointComponent>().firstWhere((j) => j.name == 'forearm_front');
+    final forearmBack = root.descendants().whereType<GachaJointComponent>().firstWhere((j) => j.name == 'forearm_back');
+    final hip = root.descendants().whereType<GachaJointComponent>().firstWhere((j) => j.name == 'hip');
+    final thighFront = root.descendants().whereType<GachaJointComponent>().firstWhere((j) => j.name == 'thigh_front');
+    final thighBack = root.descendants().whereType<GachaJointComponent>().firstWhere((j) => j.name == 'thigh_back');
+    final feetFront = root.descendants().whereType<GachaJointComponent>().firstWhere((j) => j.name == 'feet_front');
+    final feetBack = root.descendants().whereType<GachaJointComponent>().firstWhere((j) => j.name == 'feet_back');
 
     // 1. Calculate and update logical joint matrices
     _updateJointMatrices(state, tables);
@@ -80,7 +100,7 @@ class GachaGameCanvas extends FlameGame {
     final posePlacement = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'torso');
     _applyLocalTransform(torso, posePlacement?.matrix ?? const AffineMatrix.identity());
 
-    final headFlipMatrix = tables.headFlipPlacementFor(headflip: state.numeric('headflip'), name: 'head') ?? const AffineMatrix.identity();
+    final headFlipMatrix = tables.headFlipPlacementFor(headflip: state.numeric('headflip'), name: 'head')?.matrix ?? const AffineMatrix.identity();
     final headScaleX = tables.runtimeValueMaps.resolve(field: 'headsize', fieldValue: state.numeric('headsize'), op: 'scaleX', targetContains: 'head.head', fallback: 1);
     final headScaleY = tables.runtimeValueMaps.resolve(field: 'headsizey', fieldValue: state.numeric('headsizey'), op: 'scaleY', targetContains: 'head.head', fallback: 1);
     final headGroup = headFlipMatrix.multiply(AffineMatrix.scale(headScaleX, headScaleY));
@@ -107,7 +127,23 @@ class GachaGameCanvas extends FlameGame {
     }
     _applyLocalTransform(shoulderBack, shoulderBackLocal);
 
-    // Thighs
+    // Forearms (local identity modified by rotation tweens relative to shoulder parents)
+    var forearmFrontLocal = const AffineMatrix.identity();
+    if (jointRotationTweens.containsKey('forearm_front')) {
+      forearmFrontLocal = forearmFrontLocal.multiply(AffineMatrix.rotationDegrees(jointRotationTweens['forearm_front']!));
+    }
+    _applyLocalTransform(forearmFront, forearmFrontLocal);
+
+    var forearmBackLocal = const AffineMatrix.identity();
+    if (jointRotationTweens.containsKey('forearm_back')) {
+      forearmBackLocal = forearmBackLocal.multiply(AffineMatrix.rotationDegrees(jointRotationTweens['forearm_back']!));
+    }
+    _applyLocalTransform(forearmBack, forearmBackLocal);
+
+    // Hip (local identity relative to torso parent)
+    _applyLocalTransform(hip, const AffineMatrix.identity());
+
+    // Thighs (local matrix relative to hip parent)
     var thighFrontLocal = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'thigh_front')?.matrix ?? const AffineMatrix.identity();
     if (jointRotationTweens.containsKey('thigh_front')) {
       thighFrontLocal = thighFrontLocal.multiply(AffineMatrix.rotationDegrees(jointRotationTweens['thigh_front']!));
@@ -120,13 +156,26 @@ class GachaGameCanvas extends FlameGame {
     }
     _applyLocalTransform(thighBack, thighBackLocal);
 
+    // Feet (local identity modified by rotation tweens relative to thigh parents)
+    var feetFrontLocal = const AffineMatrix.identity();
+    if (jointRotationTweens.containsKey('foot_front')) {
+      feetFrontLocal = feetFrontLocal.multiply(AffineMatrix.rotationDegrees(jointRotationTweens['foot_front']!));
+    }
+    _applyLocalTransform(feetFront, feetFrontLocal);
+
+    var feetBackLocal = const AffineMatrix.identity();
+    if (jointRotationTweens.containsKey('foot_back')) {
+      feetBackLocal = feetBackLocal.multiply(AffineMatrix.rotationDegrees(jointRotationTweens['foot_back']!));
+    }
+    _applyLocalTransform(feetBack, feetBackLocal);
+
     // 3. Track and update part components dynamically
     final newKeys = <String>{};
     for (final part in scene.parts) {
       final key = _partKey(part);
       newKeys.add(key);
 
-      final targetJoint = _findTargetJoint(part, torso, head, shoulderFront, shoulderBack, thighFront, thighBack);
+      final targetJoint = _findTargetJoint(part, torso, head, shoulderFront, shoulderBack, forearmFront, forearmBack, hip, thighFront, thighBack, feetFront, feetBack);
       final parentWorldMatrix = _jointWorldMatrix(targetJoint.name);
       
       // Rig using inverse matrices: localMatrix = parentWorldMatrix.inverse() * worldTransform
@@ -182,7 +231,7 @@ class GachaGameCanvas extends FlameGame {
     final posePlacement = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'torso');
     torsoWorld = rootWorld.multiply(posePlacement?.matrix ?? const AffineMatrix.identity());
 
-    final headFlipMatrix = tables.headFlipPlacementFor(headflip: state.numeric('headflip'), name: 'head') ?? const AffineMatrix.identity();
+    final headFlipMatrix = tables.headFlipPlacementFor(headflip: state.numeric('headflip'), name: 'head')?.matrix ?? const AffineMatrix.identity();
     final headScaleX = tables.runtimeValueMaps.resolve(field: 'headsize', fieldValue: state.numeric('headsize'), op: 'scaleX', targetContains: 'head.head', fallback: 1);
     final headScaleY = tables.runtimeValueMaps.resolve(field: 'headsizey', fieldValue: state.numeric('headsizey'), op: 'scaleY', targetContains: 'head.head', fallback: 1);
     final headGroup = headFlipMatrix.multiply(AffineMatrix.scale(headScaleX, headScaleY));
@@ -207,17 +256,43 @@ class GachaGameCanvas extends FlameGame {
     }
     shoulderBackWorld = torsoWorld.multiply(shoulderBackLocal);
 
+    var forearmFrontLocal = const AffineMatrix.identity();
+    if (jointRotationTweens.containsKey('forearm_front')) {
+      forearmFrontLocal = forearmFrontLocal.multiply(AffineMatrix.rotationDegrees(jointRotationTweens['forearm_front']!));
+    }
+    forearmFrontWorld = shoulderFrontWorld.multiply(forearmFrontLocal);
+
+    var forearmBackLocal = const AffineMatrix.identity();
+    if (jointRotationTweens.containsKey('forearm_back')) {
+      forearmBackLocal = forearmBackLocal.multiply(AffineMatrix.rotationDegrees(jointRotationTweens['forearm_back']!));
+    }
+    forearmBackWorld = shoulderBackWorld.multiply(forearmBackLocal);
+
+    hipWorld = torsoWorld;
+
     var thighFrontLocal = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'thigh_front')?.matrix ?? const AffineMatrix.identity();
     if (jointRotationTweens.containsKey('thigh_front')) {
       thighFrontLocal = thighFrontLocal.multiply(AffineMatrix.rotationDegrees(jointRotationTweens['thigh_front']!));
     }
-    thighFrontWorld = torsoWorld.multiply(thighFrontLocal);
+    thighFrontWorld = hipWorld.multiply(thighFrontLocal);
 
     var thighBackLocal = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'thigh_back')?.matrix ?? const AffineMatrix.identity();
     if (jointRotationTweens.containsKey('thigh_back')) {
       thighBackLocal = thighBackLocal.multiply(AffineMatrix.rotationDegrees(jointRotationTweens['thigh_back']!));
     }
-    thighBackWorld = torsoWorld.multiply(thighBackLocal);
+    thighBackWorld = hipWorld.multiply(thighBackLocal);
+
+    var feetFrontLocal = const AffineMatrix.identity();
+    if (jointRotationTweens.containsKey('foot_front')) {
+      feetFrontLocal = feetFrontLocal.multiply(AffineMatrix.rotationDegrees(jointRotationTweens['foot_front']!));
+    }
+    feetFrontWorld = thighFrontWorld.multiply(feetFrontLocal);
+
+    var feetBackLocal = const AffineMatrix.identity();
+    if (jointRotationTweens.containsKey('foot_back')) {
+      feetBackLocal = feetBackLocal.multiply(AffineMatrix.rotationDegrees(jointRotationTweens['foot_back']!));
+    }
+    feetBackWorld = thighBackWorld.multiply(feetBackLocal);
   }
 
   AffineMatrix _jointWorldMatrix(String name) {
@@ -225,8 +300,13 @@ class GachaGameCanvas extends FlameGame {
       case 'head': return headWorld;
       case 'shoulder_front': return shoulderFrontWorld;
       case 'shoulder_back': return shoulderBackWorld;
+      case 'forearm_front': return forearmFrontWorld;
+      case 'forearm_back': return forearmBackWorld;
+      case 'hip': return hipWorld;
       case 'thigh_front': return thighFrontWorld;
       case 'thigh_back': return thighBackWorld;
+      case 'feet_front': return feetFrontWorld;
+      case 'feet_back': return feetBackWorld;
       case 'torso': return torsoWorld;
       default: return rootWorld;
     }
@@ -239,8 +319,13 @@ class GachaGameCanvas extends FlameGame {
     GachaJointComponent head,
     GachaJointComponent shoulderFront,
     GachaJointComponent shoulderBack,
+    GachaJointComponent forearmFront,
+    GachaJointComponent forearmBack,
+    GachaJointComponent hip,
     GachaJointComponent thighFront,
     GachaJointComponent thighBack,
+    GachaJointComponent feetFront,
+    GachaJointComponent feetBack,
   ) {
     final host = part.catalogPart.hostName.toLowerCase();
     final scope = part.catalogPart.hostScope.toLowerCase();
@@ -249,17 +334,32 @@ class GachaGameCanvas extends FlameGame {
     if (scope == 'head' || family.contains('eye') || family.contains('eyebrow') || family.contains('hair') || family == 'hat' || family == 'glasses' || family.contains('accessory') || family.contains('other') || family == 'mouth' || family == 'nose' || family == 'blush' || family == 'faceshadow') {
       return head;
     }
-    if (host.contains('shoulder_front') || host.contains('sleeve_front') || host.contains('hand_front') || host.contains('glove_front') || host.contains('wrist_front') || family.contains('weapon_front') || family == 'shield') {
+    if (host.contains('sleeve_front') || host.contains('hand_front') || host.contains('glove_front') || host.contains('wrist_front') || family.contains('weapon_front') || family == 'shield') {
+      return forearmFront;
+    }
+    if (host.contains('sleeve_back') || host.contains('hand_back') || host.contains('glove_back') || host.contains('wrist_back') || family.contains('weapon_back')) {
+      return forearmBack;
+    }
+    if (host.contains('shoulder_front')) {
       return shoulderFront;
     }
-    if (host.contains('shoulder_back') || host.contains('sleeve_back') || host.contains('hand_back') || host.contains('glove_back') || host.contains('wrist_back') || family.contains('weapon_back')) {
+    if (host.contains('shoulder_back')) {
       return shoulderBack;
     }
-    if (host.contains('thigh_front') || host.contains('foot_front') || host.contains('socks_front') || host.contains('shoe_front') || host.contains('knee_front')) {
+    if (host.contains('socks_front') || host.contains('shoe_front') || host.contains('foot_front') || host.contains('knee_front')) {
+      return feetFront;
+    }
+    if (host.contains('socks_back') || host.contains('shoe_back') || host.contains('foot_back') || host.contains('knee_back')) {
+      return feetBack;
+    }
+    if (host.contains('thigh_front')) {
       return thighFront;
     }
-    if (host.contains('thigh_back') || host.contains('foot_back') || host.contains('socks_back') || host.contains('shoe_back') || host.contains('knee_back')) {
+    if (host.contains('thigh_back')) {
       return thighBack;
+    }
+    if (host.contains('hip') || family.contains('belt')) {
+      return hip;
     }
     return torso;
   }
@@ -289,8 +389,8 @@ class GachaGameCanvas extends FlameGame {
     
     for (final part in parts) {
       canvas.save();
-      // Apply the absolute world matrix calculated by Flame's transform propagation natively!
-      canvas.transform(part.absoluteTransform.matrix.storage);
+      // Apply the absolute world matrix calculated by our parent-child skeletal math!
+      canvas.transform(part.part.worldTransform.toFloat64List());
       part.render(canvas);
       canvas.restore();
     }

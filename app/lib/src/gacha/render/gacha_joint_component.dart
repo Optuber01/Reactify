@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flame/components.dart';
 import 'package:flutter/painting.dart';
@@ -88,7 +89,7 @@ class GachaJointComponent extends PositionComponent {
     if (stroke.length < 2) return;
     
     final localPoints = stroke.map((p) {
-      final localVec = globalToLocal(Vector2(p.dx, p.dy));
+      final localVec = absoluteToLocal(Vector2(p.dx, p.dy));
       return Offset(localVec.x, localVec.y);
     }).toList();
 

@@ -1,0 +1,35 @@
+name: reactify_gacha
+description: "Milestone 1 Flutter renderer for Gacha Club head composition."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+  csv: ^6.0.0
+  flutter_svg: ^2.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/data/asset-resolution/
+    - assets/data/generated/
+    - assets/data/schema/
+    - assets/data/swf-frame-placements/
+    - assets/gacha/head/
+    - assets/gacha/hair/
+    - assets/gacha/eyes/
+    - assets/gacha/face/
+    - assets/gacha/body/
+    - assets/gacha/clothes/
+    - assets/gacha/props/
+    - fixtures/
+    - fixtures/builtin/

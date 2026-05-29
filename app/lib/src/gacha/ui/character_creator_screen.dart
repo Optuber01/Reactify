@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flame/game.dart';
 
 import '../code/gacha_character_state.dart';
 import '../code/gacha_code_parser.dart';
@@ -10,6 +11,13 @@ import '../data/resolver_tables.dart';
 import '../render/character_renderer.dart';
 import '../render/render_part.dart';
 import '../render/transform_graph.dart';
+import '../render/gacha_game_canvas.dart';
+import '../render/tween_engine.dart';
+import '../render/video_export_manager.dart';
+import 'widgets/timeline_track.dart';
+import 'widgets/color_wheel_picker.dart';
+import 'widgets/collapsible_sidebar.dart';
+import 'widgets/canvas_preview.dart';
 import 'debug_render_panel.dart';
 import 'editor_helpers.dart';
 
@@ -73,6 +81,7 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
     assetStore: widget.assetStore,
   );
 
+  final GachaGameCanvas _game = GachaGameCanvas();
   final TextEditingController _codeController = TextEditingController();
   final Map<String, Future<String>> _fixtureCodeCache = {};
   final Map<String, String> _colorDrafts = {};
@@ -88,6 +97,12 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
   bool _messageIsError = false;
   int _renderSerial = 0;
 
+  // Animation timeline state
+  double _currentTime = 0.0;
+  final double _maxDuration = 4.0;
+  bool _isPlaying = false;
+  final List<double> _keyframes = [0.0, 1.0, 2.0, 3.0];
+
   @override
   void initState() {
     super.initState();
@@ -100,6 +115,52 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
   void dispose() {
     _codeController.dispose();
     super.dispose();
+  }
+
+  void _togglePlayback() {
+    setState(() {
+      _isPlaying = !_isPlaying;
+    });
+    if (_isPlaying) {
+      _runPlaybackLoop();
+    }
+  }
+
+  void _runPlaybackLoop() async {
+    while (_isPlaying && mounted) {
+      await Future.delayed(const Duration(milliseconds: 33));
+      if (!_isPlaying || !mounted) break;
+      setState(() {
+        _currentTime += 0.033;
+        if (_currentTime >= _maxDuration) {
+          _currentTime = 0.0;
+        }
+      });
+    }
+  }
+
+  void _onTimeChanged(double time) {
+    setState(() {
+      _currentTime = time;
+    });
+  }
+
+  void _addKeyframe() {
+    setState(() {
+      if (!_keyframes.contains(_currentTime)) {
+        _keyframes.add(_currentTime);
+        _keyframes.sort();
+        _messageText = 'Added skeletal keyframe marker at ${_currentTime.toStringAsFixed(2)}s';
+        _messageIsError = false;
+      }
+    });
+  }
+
+  void _handleStrokesDrawn(List<Offset> stroke) {
+    setState(() {
+      _messageText = 'Captured custom drawing stroke with ${stroke.length} simplified control points!';
+      _messageIsError = false;
+    });
   }
 
   @override
@@ -126,87 +187,105 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
         : '${selectedDescriptor.displayName} (${selectedDescriptor.id})';
     final fixtureTags = selectedDescriptor?.featureTags ?? const <String>[];
 
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _HeaderBar(
-            selectedCaseId:
-                _selectedCaseId ?? widget.tables.editorFixtures.first.id,
-            cases: widget.tables.editorFixtures,
-            changeCount: changes.length,
-            resolvedPartCount: scene.parts.length,
-            onChanged: _loadFixture,
-          ),
-          const SizedBox(height: 16),
-          Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final inspector = _EditorInspector(
-                  baselineLabel: _baselineLabel,
-                  fixtureLabel: fixtureLabel,
-                  fixtureTags: fixtureTags,
-                  messageText: _messageText,
-                  messageIsError: _messageIsError,
-                  codeController: _codeController,
-                  currentState: currentState,
-                  baselineState: baselineState,
-                  scene: scene,
-                  schema: widget.tables.schema,
-                  tables: widget.tables,
-                  colorDrafts: _colorDrafts,
-                  selectedField: _selectedField,
-                  onImportPressed: _importFromTextarea,
-                  onExportPressed: _exportCurrentState,
-                  onResetToFixturePressed: _resetToSelectedFixture,
-                  onResetToBaselinePressed: _resetToBaseline,
-                  onNumericFieldChanged: _updateNumericField,
-                  onColorDraftChanged: _updateColorDraft,
-                  onColorCommit: _commitColorField,
-                  onFieldSelected: _selectField,
-                );
-                final preview = Stack(
-                  children: [
-                    Positioned.fill(child: _PreviewCard(scene: scene)),
-                    if (_sceneLoading)
-                      Positioned.fill(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.72),
-                            borderRadius: BorderRadius.circular(28),
-                          ),
-                          child: const Center(
-                            child: CircularProgressIndicator(),
+    return Container(
+      color: const Color(0xFF0F1216), // Neutral dark mode backdrop
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _HeaderBar(
+              selectedCaseId:
+                  _selectedCaseId ?? widget.tables.editorFixtures.first.id,
+              cases: widget.tables.editorFixtures,
+              changeCount: changes.length,
+              resolvedPartCount: scene.parts.length,
+              onChanged: _loadFixture,
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Main canvas & timeline workspace
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(
+                          child: Stack(
+                            children: [
+                              Positioned.fill(
+                                child: CanvasPreview(
+                                  scene: scene,
+                                  game: _game,
+                                  onStrokesDrawn: _handleStrokesDrawn,
+                                ),
+                              ),
+                              if (_sceneLoading)
+                                Positioned.fill(
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      color: Colors.black.withValues(alpha: 0.5),
+                                      borderRadius: BorderRadius.circular(28),
+                                    ),
+                                    child: const Center(
+                                      child: CircularProgressIndicator(
+                                        color: Color(0xFF64B5F6),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
                           ),
                         ),
-                      ),
-                  ],
-                );
-                if (constraints.maxWidth >= 1450) {
-                  return Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(flex: 7, child: preview),
-                      const SizedBox(width: 16),
-                      SizedBox(width: 640, child: inspector),
-                    ],
-                  );
-                }
-                return SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      SizedBox(height: 460, child: preview),
-                      const SizedBox(height: 16),
-                      inspector,
-                    ],
+                        const SizedBox(height: 16),
+                        TimelineTrack(
+                          currentTime: _currentTime,
+                          maxDuration: _maxDuration,
+                          isPlaying: _isPlaying,
+                          onTimeChanged: _onTimeChanged,
+                          onPlaybackToggle: _togglePlayback,
+                          keyframes: _keyframes,
+                          onAddKeyframe: _addKeyframe,
+                        ),
+                      ],
+                    ),
                   ),
-                );
-              },
+                  const SizedBox(width: 16),
+
+                  // Collapsible inspector sidebar
+                  CollapsibleSidebar(
+                    title: 'Editing Properties',
+                    child: _EditorInspector(
+                      baselineLabel: _baselineLabel,
+                      fixtureLabel: fixtureLabel,
+                      fixtureTags: fixtureTags,
+                      messageText: _messageText,
+                      messageIsError: _messageIsError,
+                      codeController: _codeController,
+                      currentState: currentState,
+                      baselineState: baselineState,
+                      scene: scene,
+                      schema: widget.tables.schema,
+                      tables: widget.tables,
+                      colorDrafts: _colorDrafts,
+                      selectedField: _selectedField,
+                      onImportPressed: _importFromTextarea,
+                      onExportPressed: _exportCurrentState,
+                      onResetToFixturePressed: _resetToSelectedFixture,
+                      onResetToBaselinePressed: _resetToBaseline,
+                      onNumericFieldChanged: _updateNumericField,
+                      onColorDraftChanged: _updateColorDraft,
+                      onColorCommit: _commitColorField,
+                      onFieldSelected: _selectField,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1447,6 +1526,7 @@ class _PreviewCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final game = GachaGameCanvas()..scene = scene;
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(28),
@@ -1457,9 +1537,9 @@ class _PreviewCard extends StatelessWidget {
         ),
         border: Border.all(color: const Color(0xFFA7B5C1)),
       ),
-      child: CustomPaint(
-        painter: _ScenePainter(scene),
-        child: const SizedBox.expand(),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(28),
+        child: GameWidget(game: game),
       ),
     );
   }

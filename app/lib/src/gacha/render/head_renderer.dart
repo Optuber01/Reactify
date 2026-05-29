@@ -72,16 +72,8 @@ class HeadRenderer {
     parts.addAll(eyeRenderer.resolve(state, tables));
     return [
       for (final part in parts)
-        if (_shouldRender(part) &&
-            TintPipeline.evaluateVisibility(part.visibilityRule, state))
+        if (TintPipeline.evaluateVisibility(part.visibilityRule, state))
           part,
     ];
-  }
-
-  bool _shouldRender(RenderCatalogPart part) {
-    if (part.family == 'ponytail' && part.leafId == '4756') {
-      return false;
-    }
-    return true;
   }
 }

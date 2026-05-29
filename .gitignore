@@ -1,0 +1,35 @@
+# ==========================================
+# Gacha Studio Code-Only Gitignore
+# ==========================================
+
+# 1. Ignore EVERYTHING by default in the root
+/*
+!.gitignore
+!.gitattributes
+
+# 2. Unignore only the Flutter app code directory
+!/app/
+
+# 3. Re-ignore standard Flutter/Dart/OS build artifacts inside /app
+/app/.dart_tool/
+/app/.pub/
+/app/.flutter-plugins
+/app/.flutter-plugins-dependencies
+/app/build/
+/app/tmp/
+/app/app.*.symbols
+/app/app.*.map.json
+/app/*.log
+/app/.DS_Store
+/app/.idea/
+/app/*.iml
+
+# 4. Explicitly ignore all tools, research, docs, and agentic files
+/tools/
+/docs/
+/thoughts/
+/.research/
+/.cache/
+/.assetmap/
+/nul
+.gemini/

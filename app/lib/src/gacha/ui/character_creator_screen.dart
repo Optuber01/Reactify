@@ -1,8 +1,5 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flame/game.dart';
 
 import '../code/gacha_character_state.dart';
 import '../code/gacha_code_parser.dart';
@@ -10,12 +7,11 @@ import '../code/gacha_field_schema.dart';
 import '../data/resolver_tables.dart';
 import '../render/character_renderer.dart';
 import '../render/render_part.dart';
-import '../render/transform_graph.dart';
 import '../render/gacha_game_canvas.dart';
+import '../render/gacha_joint_component.dart';
 import '../render/tween_engine.dart';
 import '../render/video_export_manager.dart';
 import 'widgets/timeline_track.dart';
-import 'widgets/color_wheel_picker.dart';
 import 'widgets/collapsible_sidebar.dart';
 import 'widgets/canvas_preview.dart';
 import 'debug_render_panel.dart';
@@ -159,6 +155,44 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
     }
   }
 
+  Future<void> _updateFrameAtTime(double time) async {
+    _game.updateAnimations(time, _animationTracks);
+    final currentState = _currentState;
+    if (currentState == null) return;
+
+    var stateForFrame = currentState;
+
+    // Speech mouth lip-sync animation (cycles every 0.8 seconds)
+    final speechTime = time % 0.8;
+    int mouthOverride = currentState.numeric('mouth');
+    if (speechTime < 0.2) {
+      mouthOverride = 2; // partially open
+    } else if (speechTime < 0.4) {
+      mouthOverride = 5; // wide open
+    } else if (speechTime < 0.6) {
+      mouthOverride = 7; // narrow speak
+    }
+
+    // Dynamic eyes blink animation (every 2.5 seconds, lasts for 0.15s)
+    final blinkTime = time % 2.5;
+    final isBlinking = blinkTime < 0.15;
+    int eyeOverride = currentState.numeric('eyes1x');
+    if (isBlinking) {
+      eyeOverride = 3; // closed eyes
+    }
+
+    if (mouthOverride != currentState.numeric('mouth')) {
+      stateForFrame = stateForFrame.updateNumericField(widget.tables.schema, 'mouth', mouthOverride);
+    }
+    if (isBlinking) {
+      stateForFrame = stateForFrame.updateNumericField(widget.tables.schema, 'eyes1x', eyeOverride);
+      stateForFrame = stateForFrame.updateNumericField(widget.tables.schema, 'eyes2x', eyeOverride);
+    }
+
+    final frameScene = await _renderer.buildScene(stateForFrame);
+    _game.updateScene(frameScene, stateForFrame, widget.tables);
+  }
+
   void _runPlaybackLoop() async {
     while (_isPlaying && mounted) {
       await Future.delayed(const Duration(milliseconds: 33));
@@ -167,13 +201,8 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
       final nextTime = _currentTime + 0.033;
       final time = nextTime >= _maxDuration ? 0.0 : nextTime;
 
-      // Update Gacha joints and child part local propagation natively
-      _game.updateAnimations(time, _animationTracks);
-      final currentState = _currentState;
-      final scene = _scene;
-      if (currentState != null && scene != null) {
-        _game.updateScene(scene, currentState, widget.tables);
-      }
+      // Update Gacha joints, child part local propagation, speech, and blinks natively
+      await _updateFrameAtTime(time);
 
       setState(() {
         _currentTime = time;
@@ -181,13 +210,8 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
     }
   }
 
-  void _onTimeChanged(double time) {
-    _game.updateAnimations(time, _animationTracks);
-    final currentState = _currentState;
-    final scene = _scene;
-    if (currentState != null && scene != null) {
-      _game.updateScene(scene, currentState, widget.tables);
-    }
+  void _onTimeChanged(double time) async {
+    await _updateFrameAtTime(time);
     setState(() {
       _currentTime = time;
     });
@@ -1625,76 +1649,7 @@ class _PanelCard extends StatelessWidget {
   }
 }
 
-class _PreviewCard extends StatelessWidget {
-  const _PreviewCard({required this.scene});
 
-  final ResolvedScene scene;
-
-  @override
-  Widget build(BuildContext context) {
-    final game = GachaGameCanvas()..scene = scene;
-    return Container(
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFE9E4D6), Color(0xFFFDFCF8), Color(0xFFD7E2E9)],
-        ),
-        border: Border.all(color: const Color(0xFFA7B5C1)),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(28),
-        child: GameWidget(game: game),
-      ),
-    );
-  }
-}
-
-class _ScenePainter extends CustomPainter {
-  const _ScenePainter(this.scene);
-
-  final ResolvedScene scene;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final backgroundPaint = Paint()..color = const Color(0x10FFFFFF);
-    for (var x = 0.0; x < size.width; x += 32) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), backgroundPaint);
-    }
-    for (var y = 0.0; y < size.height; y += 32) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), backgroundPaint);
-    }
-    if (scene.parts.isEmpty || scene.worldBounds.isEmpty) {
-      return;
-    }
-    final paddedBounds = scene.worldBounds.inflate(48);
-    final scale = math.min(
-      (size.width - 32) / paddedBounds.width,
-      (size.height - 32) / paddedBounds.height,
-    );
-    final camera = AffineMatrix.translation(
-      (size.width - paddedBounds.width * scale) / 2 - paddedBounds.left * scale,
-      (size.height - paddedBounds.height * scale) / 2 -
-          paddedBounds.top * scale,
-    ).multiply(AffineMatrix.scale(scale, scale));
-    for (final part in scene.parts) {
-      final asset = scene.assets[part.catalogPart.appAssetPath];
-      if (asset == null) {
-        continue;
-      }
-      canvas.save();
-      canvas.transform(camera.multiply(part.worldTransform).toFloat64List());
-      asset.paint(canvas, part.tintColor);
-      canvas.restore();
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _ScenePainter oldDelegate) {
-    return oldDelegate.scene != scene;
-  }
-}
 
 class _NumericFieldSpec {
   const _NumericFieldSpec(

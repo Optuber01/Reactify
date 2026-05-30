@@ -269,7 +269,16 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
     final fixtureTags = selectedDescriptor?.featureTags ?? const <String>[];
 
     return Container(
-      color: const Color(0xFF0F1216), // Neutral dark mode backdrop
+      decoration: const BoxDecoration(
+        gradient: RadialGradient(
+          center: Alignment(0.0, -0.6),
+          radius: 1.4,
+          colors: [
+            Color(0xFF1B2236),
+            Color(0xFF0C0F12),
+          ],
+        ),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -665,57 +674,38 @@ class _HeaderBar extends StatelessWidget {
       (item) => item.id == selectedCaseId,
       orElse: () => cases.first,
     );
+    const borderRadius = BorderRadius.all(Radius.circular(24));
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.9),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: const Color(0xFFB9C2CA)),
+        borderRadius: borderRadius,
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF07090C).withValues(alpha: 0.45),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
       ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Gacha Character Editor / Renderer Harness',
-                  style: Theme.of(context).textTheme.headlineSmall,
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  'Dense schema-driven editing against the canonical 445-field character state.',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-              ],
+      child: ClipRRect(
+        borderRadius: borderRadius,
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: CustomPaint(
+            foregroundPainter: _HeaderGlassBorderPainter(
+              borderRadius: borderRadius,
+              strokeWidth: 1.2,
             ),
-          ),
-          const SizedBox(width: 12),
-          Text(
-            '$changeCount changed fields • $resolvedPartCount resolved parts',
-            style: Theme.of(context).textTheme.bodyMedium,
-          ),
-          const SizedBox(width: 16),
-          SizedBox(
-            width: 320,
-            child: OutlinedButton(
-              onPressed: () async {
-                final selectedId = await showDialog<String>(
-                  context: context,
-                  builder: (context) => _FixturePickerDialog(
-                    cases: cases,
-                    selectedCaseId: selectedCaseId,
-                  ),
-                );
-                if (selectedId != null) {
-                  onChanged(selectedId);
-                }
-              },
-              style: OutlinedButton.styleFrom(
-                alignment: Alignment.centerLeft,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 12,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    const Color(0xFF1E293B).withValues(alpha: 0.45),
+                    const Color(0xFF0F172A).withValues(alpha: 0.65),
+                  ],
                 ),
               ),
               child: Row(
@@ -723,31 +713,189 @@ class _HeaderBar extends StatelessWidget {
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          selected.displayName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                        const Text(
+                          'Gacha Character Editor / Renderer Harness',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontFamily: 'Outfit',
+                            fontWeight: FontWeight.w800,
+                            fontSize: 18,
+                            letterSpacing: 0.4,
+                          ),
                         ),
+                        const SizedBox(height: 4),
                         Text(
-                          selected.group,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall,
+                          'Dense schema-driven editing against the canonical 445-field character state.',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.55),
+                            fontFamily: 'Outfit',
+                            fontWeight: FontWeight.w500,
+                            fontSize: 12,
+                          ),
                         ),
                       ],
                     ),
                   ),
-                  const Icon(Icons.expand_more, size: 20),
+                  const SizedBox(width: 12),
+                  Text(
+                    '$changeCount changed fields • $resolvedPartCount resolved parts',
+                    style: const TextStyle(
+                      color: Color(0xFF00F5FF),
+                      fontFamily: 'Outfit',
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12.5,
+                    ),
+                  ),
+                  const SizedBox(width: 20),
+                  _SpringDropdownButton(
+                    selected: selected,
+                    cases: cases,
+                    selectedCaseId: selectedCaseId,
+                    onChanged: onChanged,
+                  ),
                 ],
               ),
             ),
           ),
-        ],
+        ),
       ),
     );
   }
+}
+
+class _SpringDropdownButton extends StatefulWidget {
+  const _SpringDropdownButton({
+    required this.selected,
+    required this.cases,
+    required this.selectedCaseId,
+    required this.onChanged,
+  });
+
+  final ValidationCaseDescriptor selected;
+  final List<ValidationCaseDescriptor> cases;
+  final String selectedCaseId;
+  final ValueChanged<String> onChanged;
+
+  @override
+  State<_SpringDropdownButton> createState() => _SpringDropdownButtonState();
+}
+
+class _SpringDropdownButtonState extends State<_SpringDropdownButton> {
+  double _scale = 1.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: (_) => setState(() => _scale = 0.93),
+      onTapUp: (_) => setState(() => _scale = 1.0),
+      onTapCancel: () => setState(() => _scale = 1.0),
+      onTap: () async {
+        final selectedId = await showDialog<String>(
+          context: context,
+          builder: (context) => _FixturePickerDialog(
+            cases: widget.cases,
+            selectedCaseId: widget.selectedCaseId,
+          ),
+        );
+        if (selectedId != null) {
+          widget.onChanged(selectedId);
+        }
+      },
+      child: AnimatedScale(
+        scale: _scale,
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.decelerate,
+        child: Container(
+          width: 320,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            color: Colors.white.withValues(alpha: 0.04),
+            border: Border.all(color: const Color(0xFF00F5FF).withValues(alpha: 0.35)),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF00F5FF).withValues(alpha: 0.05),
+                blurRadius: 8,
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      widget.selected.displayName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontFamily: 'Outfit',
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12.5,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      widget.selected.group,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.45),
+                        fontFamily: 'Outfit',
+                        fontWeight: FontWeight.w500,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.expand_more, color: Color(0xFF00F5FF), size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HeaderGlassBorderPainter extends CustomPainter {
+  const _HeaderGlassBorderPainter({
+    required this.borderRadius,
+    required this.strokeWidth,
+  });
+
+  final BorderRadius borderRadius;
+  final double strokeWidth;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final rrect = borderRadius.toRRect(rect);
+    final paint = Paint()
+      ..strokeWidth = strokeWidth
+      ..style = PaintingStyle.stroke
+      ..shader = LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          Colors.white.withValues(alpha: 0.28),
+          Colors.white.withValues(alpha: 0.05),
+          Colors.black.withValues(alpha: 0.2),
+          Colors.white.withValues(alpha: 0.14),
+        ],
+        stops: const [0.0, 0.45, 0.5, 1.0],
+      ).createShader(rect);
+
+    canvas.drawRRect(rrect, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _HeaderGlassBorderPainter oldDelegate) =>
+      oldDelegate.borderRadius != borderRadius || oldDelegate.strokeWidth != strokeWidth;
 }
 
 class _FixturePickerDialog extends StatefulWidget {

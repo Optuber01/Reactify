@@ -78,6 +78,9 @@ class VideoExportManager {
     final feetFrontLocalBase = poseThighFront.inverse().multiply(poseFeetFront);
     final feetBackLocalBase = poseThighBack.inverse().multiply(poseFeetBack);
 
+    final sortedParts = List<ResolvedRenderPart>.from(scene.parts);
+    sortedParts.sort((a, b) => a.globalDepth.compareTo(b.globalDepth));
+
     // 3. Render frames sequentially evaluating keyframe timeline frame-by-frame
     final totalFrames = durationSeconds * fps;
     for (var i = 0; i < totalFrames; i++) {
@@ -160,10 +163,6 @@ class VideoExportManager {
         canvas.save();
         canvas.translate(cameraX, cameraY);
         canvas.scale(scale, scale);
-
-        // Sort globally by priority depth during render
-        final sortedParts = List<ResolvedRenderPart>.from(scene.parts);
-        sortedParts.sort((a, b) => a.globalDepth.compareTo(b.globalDepth));
 
         for (final part in sortedParts) {
           final asset = scene.assets[part.catalogPart.appAssetPath];

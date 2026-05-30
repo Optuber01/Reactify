@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:math' as math;
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flame/components.dart';
 import 'package:flutter/painting.dart';
@@ -12,18 +14,54 @@ import '../data/resolver_tables.dart';
 class GachaJointComponent extends PositionComponent {
   GachaJointComponent({
     required this.name,
-  });
+  }) {
+    _cachedTransformList[2] = 0.0;
+    _cachedTransformList[3] = 0.0;
+    _cachedTransformList[6] = 0.0;
+    _cachedTransformList[7] = 0.0;
+    _cachedTransformList[8] = 0.0;
+    _cachedTransformList[9] = 0.0;
+    _cachedTransformList[10] = 1.0;
+    _cachedTransformList[11] = 0.0;
+    _cachedTransformList[14] = 0.0;
+    _cachedTransformList[15] = 1.0;
+  }
 
   final String name;
   AffineMatrix localMatrix = const AffineMatrix.identity();
   double tweenAngle = 0.0;
 
+  final Float64List _cachedTransformList = Float64List(16);
+  AffineMatrix? _lastLocalMatrix;
+  double? _lastTweenAngle;
+
   @override
   void renderTree(Canvas canvas) {
     if (isMounted) {
       canvas.save();
-      final matrix = localMatrix.multiply(AffineMatrix.rotationDegrees(tweenAngle));
-      canvas.transform(matrix.toFloat64List());
+      
+      if (_lastLocalMatrix != localMatrix || _lastTweenAngle != tweenAngle) {
+        _lastLocalMatrix = localMatrix;
+        _lastTweenAngle = tweenAngle;
+        
+        final radians = tweenAngle * 3.141592653589793 / 180;
+        final cosVal = math.cos(radians);
+        final sinVal = math.sin(radians);
+        
+        final la = localMatrix.a;
+        final lb = localMatrix.b;
+        final lc = localMatrix.c;
+        final ld = localMatrix.d;
+        
+        _cachedTransformList[0] = la * cosVal + lc * sinVal;
+        _cachedTransformList[1] = lb * cosVal + ld * sinVal;
+        _cachedTransformList[4] = -la * sinVal + lc * cosVal;
+        _cachedTransformList[5] = -lb * sinVal + ld * cosVal;
+        _cachedTransformList[12] = localMatrix.tx;
+        _cachedTransformList[13] = localMatrix.ty;
+      }
+      
+      canvas.transform(_cachedTransformList);
       
       render(canvas);
       for (final child in children) {
@@ -156,12 +194,35 @@ class GachaPartComponent extends PositionComponent {
     required this.tintColor,
     required int globalDepth,
     required this.localMatrix,
-  }) : super(priority: globalDepth);
+  }) : super(priority: globalDepth) {
+    _cachedLocalMatrixList[2] = 0.0;
+    _cachedLocalMatrixList[3] = 0.0;
+    _cachedLocalMatrixList[6] = 0.0;
+    _cachedLocalMatrixList[7] = 0.0;
+    _cachedLocalMatrixList[8] = 0.0;
+    _cachedLocalMatrixList[9] = 0.0;
+    _cachedLocalMatrixList[10] = 1.0;
+    _cachedLocalMatrixList[11] = 0.0;
+    _cachedLocalMatrixList[14] = 0.0;
+    _cachedLocalMatrixList[15] = 1.0;
+    _updateCachedList();
+  }
 
   ResolvedRenderPart part;
   PreparedAsset? asset;
   Color? tintColor;
   AffineMatrix localMatrix;
+
+  final Float64List _cachedLocalMatrixList = Float64List(16);
+
+  void _updateCachedList() {
+    _cachedLocalMatrixList[0] = localMatrix.a;
+    _cachedLocalMatrixList[1] = localMatrix.b;
+    _cachedLocalMatrixList[4] = localMatrix.c;
+    _cachedLocalMatrixList[5] = localMatrix.d;
+    _cachedLocalMatrixList[12] = localMatrix.tx;
+    _cachedLocalMatrixList[13] = localMatrix.ty;
+  }
 
   ui.Image? _cachedGpuImage;
   bool _loadingCache = false;
@@ -175,7 +236,12 @@ class GachaPartComponent extends PositionComponent {
 
     part = newPart;
     asset = newAsset;
-    localMatrix = newLocalMatrix;
+    
+    if (localMatrix != newLocalMatrix) {
+      localMatrix = newLocalMatrix;
+      _updateCachedList();
+    }
+    
     tintColor = newPart.tintColor;
     priority = newPart.globalDepth;
   }
@@ -185,7 +251,7 @@ class GachaPartComponent extends PositionComponent {
     if (asset == null) return;
     canvas.save();
 
-    canvas.transform(localMatrix.toFloat64List());
+    canvas.transform(_cachedLocalMatrixList);
     
     final anchorX = part.catalogPart.runtimeAnchorX;
     final anchorY = part.catalogPart.runtimeAnchorY;

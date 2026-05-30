@@ -152,9 +152,9 @@ class GachaJointComponent extends PositionComponent {
 
     final existing = children.whereType<GachaDrawingPartComponent>().firstOrNull;
     if (existing != null) {
-      existing.strokes.add(localPoints);
+      existing.addStroke(localPoints);
     } else {
-      final drawingComp = GachaDrawingPartComponent(strokes: [localPoints]);
+      final drawingComp = GachaDrawingPartComponent(initialStroke: localPoints);
       add(drawingComp);
     }
   }
@@ -162,28 +162,31 @@ class GachaJointComponent extends PositionComponent {
 
 class GachaDrawingPartComponent extends PositionComponent {
   GachaDrawingPartComponent({
-    required this.strokes,
-  }) : super(priority: 9999999);
+    required List<Offset> initialStroke,
+  }) : super(priority: 9999999) {
+    addStroke(initialStroke);
+  }
 
-  final List<List<Offset>> strokes;
+  final Path _cachedPath = Path();
+
+  void addStroke(List<Offset> stroke) {
+    if (stroke.length < 2) return;
+    _cachedPath.moveTo(stroke.first.dx, stroke.first.dy);
+    for (var i = 1; i < stroke.length; i++) {
+      _cachedPath.lineTo(stroke[i].dx, stroke[i].dy);
+    }
+  }
 
   @override
   void render(Canvas canvas) {
     final paint = Paint()
-      ..color = const Color(0xFF64B5F6)
+      ..color = const Color(0xFF00F5FF)
       ..strokeWidth = 3.5
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round
       ..style = PaintingStyle.stroke;
 
-    for (final stroke in strokes) {
-      if (stroke.length < 2) continue;
-      final path = Path()..moveTo(stroke.first.dx, stroke.first.dy);
-      for (var i = 1; i < stroke.length; i++) {
-        path.lineTo(stroke[i].dx, stroke[i].dy);
-      }
-      canvas.drawPath(path, paint);
-    }
+    canvas.drawPath(_cachedPath, paint);
   }
 }
 

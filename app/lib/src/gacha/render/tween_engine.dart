@@ -32,6 +32,22 @@ class TweenEngine {
     );
   }
 
+  static int _binarySearch(List<GachaKeyframe> keyframes, double time) {
+    var low = 0;
+    var high = keyframes.length - 2;
+    while (low <= high) {
+      final mid = (low + high) >> 1;
+      if (time < keyframes[mid].time) {
+        high = mid - 1;
+      } else if (time > keyframes[mid + 1].time) {
+        low = mid + 1;
+      } else {
+        return mid;
+      }
+    }
+    return low;
+  }
+
   static GachaKeyframe interpolate({
     required List<GachaKeyframe> keyframes,
     required double time,
@@ -51,20 +67,9 @@ class TweenEngine {
       return keyframes.last;
     }
 
-    // Find bounding keyframes
-    GachaKeyframe? startFrame;
-    GachaKeyframe? endFrame;
-
-    for (var i = 0; i < keyframes.length - 1; i++) {
-      if (time >= keyframes[i].time && time <= keyframes[i + 1].time) {
-        startFrame = keyframes[i];
-        endFrame = keyframes[i + 1];
-        break;
-      }
-    }
-
-    startFrame ??= keyframes.first;
-    endFrame ??= keyframes.last;
+    final index = _binarySearch(keyframes, time);
+    final startFrame = keyframes[index];
+    final endFrame = keyframes[index + 1];
 
     final range = endFrame.time - startFrame.time;
     final progress = range == 0 ? 0.0 : (time - startFrame.time) / range;
@@ -90,19 +95,9 @@ class TweenEngine {
       return keyframes.last.angle;
     }
 
-    GachaKeyframe? startFrame;
-    GachaKeyframe? endFrame;
-
-    for (var i = 0; i < keyframes.length - 1; i++) {
-      if (time >= keyframes[i].time && time <= keyframes[i + 1].time) {
-        startFrame = keyframes[i];
-        endFrame = keyframes[i + 1];
-        break;
-      }
-    }
-
-    startFrame ??= keyframes.first;
-    endFrame ??= keyframes.last;
+    final index = _binarySearch(keyframes, time);
+    final startFrame = keyframes[index];
+    final endFrame = keyframes[index + 1];
 
     final range = endFrame.time - startFrame.time;
     final progress = range == 0 ? 0.0 : (time - startFrame.time) / range;

@@ -6,13 +6,15 @@ import 'transform_graph.dart';
 class ResolvedRenderPart {
   const ResolvedRenderPart({
     required this.catalogPart,
-    required this.worldTransform,
+    required this.localTransform,
+    required this.targetJoint,
     required this.tintColor,
     required this.globalDepth,
   });
 
   final RenderCatalogPart catalogPart;
-  final AffineMatrix worldTransform;
+  final AffineMatrix localTransform;
+  final String targetJoint;
   final Color? tintColor;
   final int globalDepth;
 
@@ -30,7 +32,8 @@ class ResolvedRenderPart {
         'x': catalogPart.runtimeAnchorX,
         'y': catalogPart.runtimeAnchorY,
       },
-      'worldTransform': worldTransform.toDebugJson(),
+      'localTransform': localTransform.toDebugJson(),
+      'targetJoint': targetJoint,
       'depth': globalDepth,
     };
   }

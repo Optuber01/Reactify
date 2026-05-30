@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flame/components.dart';
 import 'package:flutter/painting.dart';
@@ -16,6 +15,25 @@ class GachaJointComponent extends PositionComponent {
   });
 
   final String name;
+  AffineMatrix localMatrix = const AffineMatrix.identity();
+  double tweenAngle = 0.0;
+
+  @override
+  void renderTree(Canvas canvas) {
+    if (isMounted) {
+      canvas.save();
+      final matrix = localMatrix.multiply(AffineMatrix.rotationDegrees(tweenAngle));
+      canvas.transform(matrix.toFloat64List());
+      
+      render(canvas);
+      for (final child in children) {
+        child.renderTree(canvas);
+      }
+      
+      canvas.restore();
+    }
+  }
+
   GachaPartComponent? _swappedPart;
 
   void swapCustomAsset(String filePath, String assetKind) async {
@@ -68,7 +86,8 @@ class GachaJointComponent extends PositionComponent {
         localMatrix: const AffineMatrix.identity(),
         notes: '',
       ),
-      worldTransform: const AffineMatrix.identity(),
+      localTransform: const AffineMatrix.identity(),
+      targetJoint: name,
       tintColor: null,
       globalDepth: 999999,
     );
@@ -136,14 +155,13 @@ class GachaPartComponent extends PositionComponent {
     required this.asset,
     required this.tintColor,
     required int globalDepth,
-    required AffineMatrix localMatrix,
-  }) : super(priority: globalDepth) {
-    _applyLocalMatrix(localMatrix);
-  }
+    required this.localMatrix,
+  }) : super(priority: globalDepth);
 
   ResolvedRenderPart part;
   PreparedAsset? asset;
   Color? tintColor;
+  AffineMatrix localMatrix;
 
   ui.Image? _cachedGpuImage;
   bool _loadingCache = false;
@@ -157,26 +175,17 @@ class GachaPartComponent extends PositionComponent {
 
     part = newPart;
     asset = newAsset;
+    localMatrix = newLocalMatrix;
     tintColor = newPart.tintColor;
     priority = newPart.globalDepth;
-
-    _applyLocalMatrix(newLocalMatrix);
-  }
-
-  void _applyLocalMatrix(AffineMatrix matrix) {
-    final scaleX = ui.lerpDouble(0, 1, math.sqrt(matrix.a * matrix.a + matrix.b * matrix.b)) ?? 1.0;
-    final scaleY = ui.lerpDouble(0, 1, math.sqrt(matrix.c * matrix.c + matrix.d * matrix.d)) ?? 1.0;
-    final angleVal = math.atan2(matrix.b, matrix.a);
-
-    position = Vector2(matrix.tx, matrix.ty);
-    scale = Vector2(scaleX, scaleY);
-    angle = angleVal;
   }
 
   @override
   void render(Canvas canvas) {
     if (asset == null) return;
     canvas.save();
+
+    canvas.transform(localMatrix.toFloat64List());
     
     final anchorX = part.catalogPart.runtimeAnchorX;
     final anchorY = part.catalogPart.runtimeAnchorY;

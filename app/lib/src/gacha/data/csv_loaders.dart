@@ -24,11 +24,9 @@ class CsvLoaders {
   }
 
   static List<Map<String, String>> parseCsv(String raw) {
-    final normalized = raw.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
     final rows = const CsvToListConverter(
       shouldParseNumbers: false,
-      eol: '\n',
-    ).convert(normalized);
+    ).convert(raw);
     if (rows.isEmpty) {
       return const [];
     }

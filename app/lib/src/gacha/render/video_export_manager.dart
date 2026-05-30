@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter_quick_video_encoder/flutter_quick_video_encoder.dart';
@@ -38,7 +39,18 @@ class VideoExportManager {
       filepath: filepath,
     );
 
-    // 2. Pre-calculate base joint matrices relative to parents (same as GachaGameCanvas)
+    final partTransformList = Float64List(16);
+    partTransformList[2] = 0.0;
+    partTransformList[3] = 0.0;
+    partTransformList[6] = 0.0;
+    partTransformList[7] = 0.0;
+    partTransformList[8] = 0.0;
+    partTransformList[9] = 0.0;
+    partTransformList[10] = 1.0;
+    partTransformList[11] = 0.0;
+    partTransformList[14] = 0.0;
+    partTransformList[15] = 1.0;
+
     final heightX = tables.runtimeValueMaps.resolve(field: 'heightx', fieldValue: state.numeric('heightx'), op: 'scaleX', targetContains: 'char.char', fallback: 1);
     final heightY = tables.runtimeValueMaps.resolve(field: 'heighty', fieldValue: state.numeric('heighty'), op: 'scaleY', targetContains: 'char.char', fallback: 1);
     final rootLocal = AffineMatrix.scale(heightX, heightY);
@@ -160,13 +172,18 @@ class VideoExportManager {
           if (asset == null) continue;
 
           final parentWorld = jointAnimatedWorld(part.targetJoint);
-          // Hierarchial coordinate propagation! world = parentWorld * localTransform
           final finalWorldMatrix = parentWorld.multiply(part.localTransform);
 
+          partTransformList[0] = finalWorldMatrix.a;
+          partTransformList[1] = finalWorldMatrix.b;
+          partTransformList[4] = finalWorldMatrix.c;
+          partTransformList[5] = finalWorldMatrix.d;
+          partTransformList[12] = finalWorldMatrix.tx;
+          partTransformList[13] = finalWorldMatrix.ty;
+
           canvas.save();
-          canvas.transform(finalWorldMatrix.toFloat64List());
+          canvas.transform(partTransformList);
           
-          // Apply anchor translations
           final anchorX = part.catalogPart.runtimeAnchorX;
           final anchorY = part.catalogPart.runtimeAnchorY;
           canvas.translate(anchorX, anchorY);

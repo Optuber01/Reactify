@@ -19,6 +19,12 @@ class GachaVectorCache {
       return _gpuCache[key]!;
     }
 
+    if (_gpuCache.length >= 150) {
+      final firstKey = _gpuCache.keys.first;
+      final oldImage = _gpuCache.remove(firstKey);
+      oldImage?.dispose();
+    }
+
     // Rasterize at 2x resolution for locked 60 FPS visual premium fidelity
     const scale = 2.0;
     final width = (asset.size.width * scale).ceil();

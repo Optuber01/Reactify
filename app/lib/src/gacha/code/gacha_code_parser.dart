@@ -7,6 +7,7 @@ class GachaCodeParser {
   const GachaCodeParser(this.schema);
 
   final GachaFieldSchema schema;
+  static final RegExp _colorRegExp = RegExp(r'^[0-9A-Fa-f]{6}$');
 
   GachaCharacterState parse(String code) {
     final fields = code.trim().split('|');
@@ -32,7 +33,7 @@ class GachaCodeParser {
           }
           numericFields[definition.field] = parsed;
         case GachaFieldKind.color:
-          if (!RegExp(r'^[0-9A-Fa-f]{6}$').hasMatch(value)) {
+          if (!_colorRegExp.hasMatch(value)) {
             throw FormatException(
               'Invalid color value for ${definition.field}: $value',
             );

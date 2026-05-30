@@ -330,7 +330,7 @@ String _prettyFixtureLabel(String id) {
 }
 
 class PosePlacementKey {
-  const PosePlacementKey({
+  const PosePlacementKey._({
     required this.page,
     required this.localFrame,
     required this.name,
@@ -339,6 +339,20 @@ class PosePlacementKey {
   final int page;
   final int localFrame;
   final String name;
+
+  static final Map<String, PosePlacementKey> _cache = {};
+
+  factory PosePlacementKey({
+    required int page,
+    required int localFrame,
+    required String name,
+  }) {
+    final key = '$page|$localFrame|$name';
+    return _cache.putIfAbsent(
+      key,
+      () => PosePlacementKey._(page: page, localFrame: localFrame, name: name),
+    );
+  }
 
   @override
   bool operator ==(Object other) {

@@ -4,8 +4,10 @@ import '../code/gacha_character_state.dart';
 import '../data/resolver_tables.dart';
 import '../render/render_part.dart';
 
+final RegExp _rgbHexRegExp = RegExp(r'^[0-9A-Fa-f]{6}$');
+
 bool isValidRgbHex(String value) {
-  return RegExp(r'^[0-9A-Fa-f]{6}$').hasMatch(value.trim());
+  return _rgbHexRegExp.hasMatch(value.trim());
 }
 
 String? canonicalRgbHexOrNull(String value) {
@@ -84,20 +86,24 @@ const Map<String, List<String>> _previewFieldFamilies = {
 bool isPreviewBackedField(String field) =>
     _previewFieldFamilies.containsKey(field);
 
+final Map<String, List<int>> _previewSupportedValuesCache = {};
+
 List<int> previewSupportedValues(ResolverTables tables, String field) {
-  final families = _previewFieldFamilies[field];
-  if (families == null) {
-    return const [];
-  }
-  final values = SplayTreeSet<int>();
-  for (final family in families) {
-    final familyFrames = tables.catalogByFamilyFrame[family];
-    if (familyFrames == null) {
-      continue;
+  return _previewSupportedValuesCache.putIfAbsent(field, () {
+    final families = _previewFieldFamilies[field];
+    if (families == null) {
+      return const [];
     }
-    values.addAll(familyFrames.keys);
-  }
-  return values.toList(growable: false);
+    final values = SplayTreeSet<int>();
+    for (final family in families) {
+      final familyFrames = tables.catalogByFamilyFrame[family];
+      if (familyFrames == null) {
+        continue;
+      }
+      values.addAll(familyFrames.keys);
+    }
+    return values.toList(growable: false);
+  });
 }
 
 String previewSupportLabel(ResolverTables tables, String field) {

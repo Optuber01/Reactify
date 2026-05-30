@@ -96,6 +96,8 @@ class GachaCharacterState {
     );
   }
 
+  static final RegExp _colorRegExp = RegExp(r'^[0-9A-Fa-f]{6}$');
+
   GachaCharacterState updateRawField(
     GachaFieldSchema schema,
     String field,
@@ -115,7 +117,7 @@ class GachaCharacterState {
         }
         return updateNumericField(schema, field, parsed);
       case GachaFieldKind.color:
-        if (!RegExp(r'^[0-9A-Fa-f]{6}$').hasMatch(rawValue)) {
+        if (!_colorRegExp.hasMatch(rawValue)) {
           throw FormatException('Invalid color value for $field: $rawValue');
         }
         return updateColorField(

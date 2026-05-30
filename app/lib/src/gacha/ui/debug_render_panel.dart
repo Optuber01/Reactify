@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 
 import '../code/gacha_character_state.dart';
@@ -33,8 +34,8 @@ class DebugRenderPanel extends StatelessWidget {
     final expectedFamilies = expectedResolvedFamiliesForState(state).toList()
       ..sort();
     final missingFamilies = expectedFamilies
-        .where((family) => !familyCounts.containsKey(family))
-        .toList(growable: false);
+      .where((family) => !familyCounts.containsKey(family))
+      .toList(growable: false);
     final bounds = scene.worldBounds;
     final selectedDefinition = selectedField == null
         ? null
@@ -43,120 +44,174 @@ class DebugRenderPanel extends StatelessWidget {
         ? null
         : state.rawValue(schema, selectedField!, fallback: '');
 
+    const borderRadius = BorderRadius.all(Radius.circular(18));
+
     return Container(
-      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.86),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFB9C2CA)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Debug / Renderer Feedback',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 12),
-          _kv(context, 'Fixture / Code', fixtureLabel),
-          _kv(
-            context,
-            'Fixture tags',
-            fixtureTags.isEmpty ? 'none' : fixtureTags.join(', '),
-          ),
-          _kv(context, 'Resolved part count', '${scene.parts.length}'),
-          _kv(context, 'Bounds', _formatBounds(bounds)),
-          _kv(context, 'Changed fields', '${changes.length}'),
-          _kv(
-            context,
-            'Visible families',
-            visibleFamilies.isEmpty ? 'none' : visibleFamilies.join(', '),
-          ),
-          _kv(
-            context,
-            'Missing / unresolved selected families',
-            missingFamilies.isEmpty ? 'none' : missingFamilies.join(', '),
-            valueColor: missingFamilies.isEmpty
-                ? null
-                : const Color(0xFF8A2B2B),
-          ),
-          if (selectedDefinition != null && selectedValue != null)
-            _kv(
-              context,
-              'Selected field',
-              '[${selectedDefinition.index}] ${selectedDefinition.field} = $selectedValue',
-            ),
-          if (selectedField != null)
-            _kv(
-              context,
-              'Selected field support',
-              isPreviewBackedField(selectedField!)
-                  ? 'preview-backed'
-                  : 'state-only / export-only',
-              valueColor: isPreviewBackedField(selectedField!)
-                  ? const Color(0xFF2B5A39)
-                  : const Color(0xFF8A5A2B),
-            ),
-          if (scene.warnings.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Text('Warnings', style: Theme.of(context).textTheme.titleSmall),
-            const SizedBox(height: 6),
-            for (final warning in scene.warnings)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Text(
-                  warning,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: const Color(0xFF8A2B2B),
-                  ),
-                ),
-              ),
-          ],
-          const SizedBox(height: 12),
-          Text(
-            'Per-family part count',
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
-          const SizedBox(height: 6),
-          SelectableText(
-            familyCounts.isEmpty
-                ? 'No render parts resolved.'
-                : visibleFamilies
-                      .map(
-                        (family) =>
-                            '$family -> ${familyCounts[family]} part(s)',
-                      )
-                      .join('\n'),
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              fontFamily: 'Consolas',
-              height: 1.35,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text('Changed fields', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 6),
-          SelectableText(
-            changes.isEmpty
-                ? 'No fields changed from the imported baseline.'
-                : _formatChanges(changes),
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              fontFamily: 'Consolas',
-              height: 1.35,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text('Resolved parts', style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 6),
-          SelectableText(
-            scene.parts.isEmpty
-                ? 'No render parts resolved.'
-                : _formatParts(scene.parts),
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              fontFamily: 'Consolas',
-              height: 1.35,
-            ),
+        borderRadius: borderRadius,
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF07090C).withValues(alpha: 0.35),
+            blurRadius: 24,
+            offset: const Offset(0, 8),
           ),
         ],
+      ),
+      child: ClipRRect(
+        borderRadius: borderRadius,
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: CustomPaint(
+            foregroundPainter: _GlassBorderPainter(
+              borderRadius: borderRadius,
+              strokeWidth: 1.2,
+            ),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    const Color(0xFF1E293B).withValues(alpha: 0.45),
+                    const Color(0xFF0F172A).withValues(alpha: 0.65),
+                  ],
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Debug / Renderer Feedback',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                  ),
+                  const SizedBox(height: 12),
+                  _kv(context, 'Fixture / Code', fixtureLabel),
+                  _kv(
+                    context,
+                    'Fixture tags',
+                    fixtureTags.isEmpty ? 'none' : fixtureTags.join(', '),
+                  ),
+                  _kv(context, 'Resolved part count', '${scene.parts.length}'),
+                  _kv(context, 'Bounds', _formatBounds(bounds)),
+                  _kv(context, 'Changed fields', '${changes.length}'),
+                  _kv(
+                    context,
+                    'Visible families',
+                    visibleFamilies.isEmpty ? 'none' : visibleFamilies.join(', '),
+                  ),
+                  _kv(
+                    context,
+                    'Missing / unresolved selected families',
+                    missingFamilies.isEmpty ? 'none' : missingFamilies.join(', '),
+                    valueColor: missingFamilies.isEmpty
+                        ? null
+                        : const Color(0xFFFF6B6B),
+                  ),
+                  if (selectedDefinition != null && selectedValue != null)
+                    _kv(
+                      context,
+                      'Selected field',
+                      '[${selectedDefinition.index}] ${selectedDefinition.field} = $selectedValue',
+                    ),
+                  if (selectedField != null)
+                    _kv(
+                      context,
+                      'Selected field support',
+                      isPreviewBackedField(selectedField!)
+                          ? 'preview-backed'
+                          : 'state-only / export-only',
+                      valueColor: isPreviewBackedField(selectedField!)
+                          ? const Color(0xFF4ADE80)
+                          : const Color(0xFFFBBF24),
+                    ),
+                  if (scene.warnings.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      'Warnings',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            color: Colors.white,
+                          ),
+                    ),
+                    const SizedBox(height: 6),
+                    for (final warning in scene.warnings)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Text(
+                          warning,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: const Color(0xFFFF6B6B),
+                          ),
+                        ),
+                      ),
+                  ],
+                  const SizedBox(height: 12),
+                  Text(
+                    'Per-family part count',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          color: Colors.white,
+                        ),
+                  ),
+                  const SizedBox(height: 6),
+                  SelectableText(
+                    familyCounts.isEmpty
+                        ? 'No render parts resolved.'
+                        : visibleFamilies
+                              .map(
+                                (family) =>
+                                    '$family -> ${familyCounts[family]} part(s)',
+                              )
+                              .join('\n'),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontFamily: 'Consolas',
+                      color: Colors.white.withValues(alpha: 0.8),
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Changed fields',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          color: Colors.white,
+                        ),
+                  ),
+                  const SizedBox(height: 6),
+                  SelectableText(
+                    changes.isEmpty
+                        ? 'No fields changed from the imported baseline.'
+                        : _formatChanges(changes),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontFamily: 'Consolas',
+                      color: Colors.white.withValues(alpha: 0.8),
+                      height: 1.35,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'Resolved parts',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          color: Colors.white,
+                        ),
+                  ),
+                  const SizedBox(height: 6),
+                  SelectableText(
+                    scene.parts.isEmpty
+                        ? 'No render parts resolved.'
+                        : _formatParts(scene.parts),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontFamily: 'Consolas',
+                      color: Colors.white.withValues(alpha: 0.8),
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -171,15 +226,21 @@ class DebugRenderPanel extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 6),
       child: RichText(
         text: TextSpan(
-          style: Theme.of(context).textTheme.bodyMedium,
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: Colors.white.withValues(alpha: 0.7),
+              ) ??
+              const TextStyle(color: Colors.white70),
           children: [
             TextSpan(
               text: '$label: ',
-              style: const TextStyle(fontWeight: FontWeight.w600),
+              style: const TextStyle(
+                fontWeight: FontWeight.w600,
+                color: Colors.white90,
+              ),
             ),
             TextSpan(
               text: value,
-              style: TextStyle(color: valueColor),
+              style: TextStyle(color: valueColor ?? Colors.white70),
             ),
           ],
         ),
@@ -222,4 +283,40 @@ class DebugRenderPanel extends StatelessWidget {
     }
     return buffer.toString().trimRight();
   }
+}
+
+class _GlassBorderPainter extends CustomPainter {
+  const _GlassBorderPainter({
+    required this.borderRadius,
+    required this.strokeWidth,
+  });
+
+  final BorderRadius borderRadius;
+  final double strokeWidth;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final rrect = borderRadius.toRRect(rect);
+    final paint = Paint()
+      ..strokeWidth = strokeWidth
+      ..style = PaintingStyle.stroke
+      ..shader = LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          Colors.white.withValues(alpha: 0.28),
+          Colors.white.withValues(alpha: 0.05),
+          Colors.black.withValues(alpha: 0.2),
+          Colors.white.withValues(alpha: 0.14),
+        ],
+        stops: const [0.0, 0.45, 0.5, 1.0],
+      ).createShader(rect);
+
+    canvas.drawRRect(rrect, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _GlassBorderPainter oldDelegate) =>
+      oldDelegate.borderRadius != borderRadius || oldDelegate.strokeWidth != strokeWidth;
 }

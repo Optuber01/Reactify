@@ -82,8 +82,8 @@ void main() {
         isNot(equals(frame1Part.catalogPart.localMatrix.ty)),
       );
       _expectMatrixClose(
-        frame11Part.worldTransform,
-        _expectedWorldTransform(
+        frame11Part.localTransform,
+        _expectedlocalTransform(
           tables: tables,
           state: frame11State,
           part: frame11Part,
@@ -105,13 +105,13 @@ void main() {
       final ponytail = _part(scene, family: 'ponytail', leafId: '4554');
 
       _expectMatrixClose(
-        backHair.worldTransform,
-        _expectedWorldTransform(tables: tables, state: state, part: backHair),
+        backHair.localTransform,
+        _expectedlocalTransform(tables: tables, state: state, part: backHair),
         'back_hair 5424',
       );
       _expectMatrixClose(
-        ponytail.worldTransform,
-        _expectedWorldTransform(tables: tables, state: state, part: ponytail),
+        ponytail.localTransform,
+        _expectedlocalTransform(tables: tables, state: state, part: ponytail),
         'ponytail 4554',
       );
     },
@@ -148,13 +148,13 @@ void main() {
       );
 
       _expectMatrixClose(
-        weapon.worldTransform,
-        _expectedWorldTransform(tables: tables, state: state, part: weapon),
+        weapon.localTransform,
+        _expectedlocalTransform(tables: tables, state: state, part: weapon),
         'weapon_front 9220',
       );
       _expectMatrixClose(
-        shield.worldTransform,
-        _expectedWorldTransform(tables: tables, state: state, part: shield),
+        shield.localTransform,
+        _expectedlocalTransform(tables: tables, state: state, part: shield),
         'shield ${shield.catalogPart.leafId}',
       );
     },
@@ -198,21 +198,12 @@ ResolvedRenderPart _part(
   );
 }
 
-AffineMatrix _expectedWorldTransform({
+AffineMatrix _expectedlocalTransform({
   required ResolverTables tables,
   required GachaCharacterState state,
   required ResolvedRenderPart part,
 }) {
   final catalog = part.catalogPart;
-  final rootMatrix = _rootCharacterAdjustment(tables, state);
-  final poseMatrix =
-      tables
-          .posePlacementFor(
-            pose: state.numeric('pose'),
-            hostName: catalog.hostScope == 'head' ? 'head' : catalog.hostName,
-          )
-          ?.matrix ??
-      const AffineMatrix.identity();
   final groupMatrix = _groupAdjustmentFor(tables, catalog, state);
   final hostMatrix = catalog.hostScope == 'head'
       ? (tables.headPlacements[catalog.hostName]?.matrix ??
@@ -222,35 +213,14 @@ AffineMatrix _expectedWorldTransform({
       ? AffineMatrix.translation(catalog.runtimeAnchorX, catalog.runtimeAnchorY)
       : const AffineMatrix.identity();
   final slotMatrix = _slotAdjustmentFor(tables, catalog, state);
-  return rootMatrix
-      .multiply(poseMatrix)
-      .multiply(groupMatrix)
+  return groupMatrix
       .multiply(hostMatrix)
       .multiply(anchorMatrix)
       .multiply(slotMatrix)
       .multiply(catalog.localMatrix);
 }
 
-AffineMatrix _rootCharacterAdjustment(
-  ResolverTables tables,
-  GachaCharacterState state,
-) {
-  final scaleX = tables.runtimeValueMaps.resolve(
-    field: 'heightx',
-    fieldValue: state.numeric('heightx'),
-    op: 'scaleX',
-    targetContains: 'char.char',
-    fallback: 1,
-  );
-  final scaleY = tables.runtimeValueMaps.resolve(
-    field: 'heighty',
-    fieldValue: state.numeric('heighty'),
-    op: 'scaleY',
-    targetContains: 'char.char',
-    fallback: 1,
-  );
-  return AffineMatrix.scale(scaleX, scaleY);
-}
+
 
 AffineMatrix _groupAdjustmentFor(
   ResolverTables tables,

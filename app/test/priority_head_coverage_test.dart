@@ -225,7 +225,7 @@ Map<String, Rect> _familyBounds(ResolvedScene scene) {
     if (asset == null) {
       continue;
     }
-    final bounds = part.worldTransform.transformRect(
+    final bounds = part.localTransform.transformRect(
       Rect.fromLTWH(0, 0, asset.size.width, asset.size.height),
     );
     result.update(

@@ -223,7 +223,7 @@ Rect? _combinedBounds(
     if (asset == null) {
       continue;
     }
-    final rect = part.worldTransform.transformRect(
+    final rect = part.localTransform.transformRect(
       Rect.fromLTWH(0, 0, asset.size.width, asset.size.height),
     );
     bounds = bounds == null ? rect : bounds.expandToInclude(rect);

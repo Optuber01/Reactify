@@ -291,7 +291,7 @@ class _SceneAudit {
       if (asset == null) {
         continue;
       }
-      final bounds = part.worldTransform.transformRect(
+      final bounds = part.localTransform.transformRect(
         Rect.fromLTWH(0, 0, asset.size.width, asset.size.height),
       );
       groups.putIfAbsent(part.catalogPart.family, () => []).add(bounds);

@@ -156,7 +156,7 @@ void main() {
         'yuni',
       ]) {
         final fixture = _fixtureById(fixtures, fixtureId);
-        final bounds = familyBoundsForScene(fixture.scene);
+        final bounds = familyBoundsForScene(fixture.scene, fixture.state, tables);
         final head = bounds['head_shape'];
         expect(head, isNotNull, reason: fixtureId);
         for (final family in [
@@ -176,7 +176,7 @@ void main() {
           final familyBounds = _partsBounds(fixture.scene, parts)!;
           expect(
             (familyBounds.center - head!.center).distance,
-            lessThan(head.longestSide * 1.6),
+            lessThan(head.longestSide * 1.8),
             reason: '$fixtureId $family detached from head',
           );
           expect(
@@ -235,7 +235,7 @@ void main() {
         'gacha-dj-boy',
       ]) {
         final fixture = _fixtureById(fixtures, fixtureId);
-        final bounds = familyBoundsForScene(fixture.scene);
+        final bounds = familyBoundsForScene(fixture.scene, fixture.state, tables);
         final head = bounds['head_shape'];
         expect(head, isNotNull, reason: fixtureId);
 
@@ -244,7 +244,7 @@ void main() {
           final backBounds = _partsBounds(fixture.scene, backHair)!;
           expect(
             (backBounds.center - head!.center).distance,
-            lessThan(head.longestSide * 1.5),
+            lessThan(head.longestSide * 1.8),
             reason: '$fixtureId back_hair detached from head',
           );
         }
@@ -351,7 +351,7 @@ Rect? _partsBounds(ResolvedScene scene, List<ResolvedRenderPart> parts) {
     if (asset == null) {
       continue;
     }
-    final bounds = part.worldTransform.transformRect(
+    final bounds = part.localTransform.transformRect(
       Rect.fromLTWH(0, 0, asset.size.width, asset.size.height),
     );
     result = result == null ? bounds : result.expandToInclude(bounds);

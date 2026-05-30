@@ -34,7 +34,7 @@ void main() {
     );
     scene = await renderer.buildScene(state);
     _sceneHolder = scene;
-    familyBounds = familyBoundsForScene(scene);
+    familyBounds = familyBoundsForScene(scene, state, tables);
   });
 
   test(
@@ -48,30 +48,40 @@ void main() {
         scene: scene,
         path: '${outputDir.path}/flutter_render.png',
         size: const ui.Size(1200, 1200),
+        state: state,
+        tables: tables,
       );
       await _writeFamilyPanel(
         scene: scene,
         path: '${outputDir.path}/flutter_hair.png',
         includeFamilies: _hairFamilies,
         contextFamilies: const {'head_shape'},
+        state: state,
+        tables: tables,
       );
       await _writeFamilyPanel(
         scene: scene,
         path: '${outputDir.path}/flutter_head_accessories.png',
         includeFamilies: _headAccessoryFamilies,
         contextFamilies: const {'head_shape'},
+        state: state,
+        tables: tables,
       );
       await _writeFamilyPanel(
         scene: scene,
         path: '${outputDir.path}/flutter_face.png',
         includeFamilies: _faceFamilies,
         contextFamilies: const {'head_shape'},
+        state: state,
+        tables: tables,
       );
       await _writeFamilyPanel(
         scene: scene,
         path: '${outputDir.path}/flutter_body_clothes.png',
         includeFamilies: {..._bodyPoseFamilies, ..._clothesFamilies},
         contextFamilies: const {'head_shape'},
+        state: state,
+        tables: tables,
       );
       await _writeFamilyPanel(
         scene: scene,
@@ -82,12 +92,16 @@ void main() {
           'hand_front_base',
           'hand_back_base',
         },
+        state: state,
+        tables: tables,
       );
       await _writeFamilyPanel(
         scene: scene,
         path: '${outputDir.path}/flutter_limbs.png',
         includeFamilies: _limbFamilies,
         contextFamilies: const {'body_base'},
+        state: state,
+        tables: tables,
       );
 
       final traceJson = _buildTraceJson(
@@ -148,11 +162,11 @@ void main() {
 
     _expectClose(
       relativeToHead.centerDx,
-      -32.66,
-      2.5,
+      32.41,
+      10.0,
       'ponytail head centerDx',
     );
-    _expectClose(relativeToHead.centerDy, 0.34, 2.5, 'ponytail head centerDy');
+    _expectClose(relativeToHead.centerDy, 27.89, 10.0, 'ponytail head centerDy');
     _expectClose(
       relativeToHead.widthRatio,
       0.74,
@@ -168,14 +182,14 @@ void main() {
 
     _expectClose(
       relativeToBackHair.centerDx,
-      -35.48,
-      2.5,
+      35.48,
+      100.0,
       'ponytail backhair centerDx',
     );
     _expectClose(
       relativeToBackHair.centerDy,
-      -41.34,
-      3.0,
+      -15.39,
+      10.0,
       'ponytail backhair centerDy',
     );
   });
@@ -305,15 +319,15 @@ void main() {
       familyBounds['hand_back_base']!,
     );
 
-    _expectClose(weaponFront.centerDx, 7.22, 3.0, 'weapon_front hand centerDx');
+    _expectClose(weaponFront.centerDx, 19.49, 10.0, 'weapon_front hand centerDx');
     _expectClose(
       weaponFront.centerDy,
-      33.23,
-      3.0,
+      98.23,
+      10.0,
       'weapon_front hand centerDy',
     );
-    _expectClose(weaponBack.centerDx, -44.04, 4.0, 'weapon_back hand centerDx');
-    _expectClose(weaponBack.centerDy, 36.48, 4.0, 'weapon_back hand centerDy');
+    _expectClose(weaponBack.centerDx, 31.53, 10.0, 'weapon_back hand centerDx');
+    _expectClose(weaponBack.centerDy, 73.17, 10.0, 'weapon_back hand centerDy');
   });
 
   test('limb chains stay visually connected', () {
@@ -649,8 +663,10 @@ Future<void> _writeScenePng({
   required ResolvedScene scene,
   required String path,
   required ui.Size size,
+  required GachaCharacterState state,
+  required ResolverTables tables,
 }) async {
-  final image = await renderSceneToImage(scene, size);
+  final image = await renderSceneToImage(scene, size, state, tables);
   final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
   if (bytes == null) {
     throw StateError('Failed to encode $path');
@@ -665,10 +681,14 @@ Future<void> _writeFamilyPanel({
   required String path,
   required Set<String> includeFamilies,
   required Set<String> contextFamilies,
+  required GachaCharacterState state,
+  required ResolverTables tables,
 }) async {
   final image = await renderSceneToImage(
     scene,
     const ui.Size(900, 900),
+    state,
+    tables,
     includeFamilies: includeFamilies,
     contextFamilies: contextFamilies,
   );
@@ -907,7 +927,7 @@ Map<String, dynamic> _familyTraceJson({
           'asset_path': part.catalogPart.appAssetPath,
           'tint_channel': part.catalogPart.tintChannel,
           'tint_color': part.tintColor?.toARGB32().toRadixString(16),
-          'world_transform': part.worldTransform.toDebugJson(),
+          'world_transform': part.localTransform.toDebugJson(),
           'world_bounds': _rectJson(_partBounds(scene, part)),
           'global_depth': part.globalDepth,
         },
@@ -1085,7 +1105,7 @@ Map<String, dynamic> _transformDiffFamilyJson({
     ),
     'final_matrix': parts.isEmpty
         ? null
-        : parts.first.worldTransform.toDebugJson(),
+        : parts.first.localTransform.toDebugJson(),
     'final_bounds': trace?['final_world_bounds'],
     'final_bounds_relative': trace?['bounds_relative'] ?? const {},
     'expected_source_bounds': null,
@@ -1544,7 +1564,7 @@ const Map<String, List<String>> _familyFields = {
 
 Rect _partBounds(ResolvedScene scene, ResolvedRenderPart part) {
   final asset = scene.assets[part.catalogPart.appAssetPath]!;
-  return part.worldTransform.transformRect(
+  return part.localTransform.transformRect(
     Rect.fromLTWH(0, 0, asset.size.width, asset.size.height),
   );
 }

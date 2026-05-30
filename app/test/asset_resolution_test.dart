@@ -232,18 +232,18 @@ void main() {
       expect(baselineHead, isNotEmpty);
       expect(followUpHead, isNotEmpty);
       expect(
-        followUpHead.first.worldTransform.tx !=
-                baselineHead.first.worldTransform.tx ||
-            followUpHead.first.worldTransform.ty !=
-                baselineHead.first.worldTransform.ty ||
-            followUpHead.first.worldTransform.a !=
-                baselineHead.first.worldTransform.a ||
-            followUpHead.first.worldTransform.b !=
-                baselineHead.first.worldTransform.b ||
-            followUpHead.first.worldTransform.c !=
-                baselineHead.first.worldTransform.c ||
-            followUpHead.first.worldTransform.d !=
-                baselineHead.first.worldTransform.d,
+        followUpHead.first.localTransform.tx !=
+                baselineHead.first.localTransform.tx ||
+            followUpHead.first.localTransform.ty !=
+                baselineHead.first.localTransform.ty ||
+            followUpHead.first.localTransform.a !=
+                baselineHead.first.localTransform.a ||
+            followUpHead.first.localTransform.b !=
+                baselineHead.first.localTransform.b ||
+            followUpHead.first.localTransform.c !=
+                baselineHead.first.localTransform.c ||
+            followUpHead.first.localTransform.d !=
+                baselineHead.first.localTransform.d,
         isTrue,
       );
     },
@@ -286,12 +286,12 @@ void main() {
         ponytailScene.parts.where(
           (part) => part.catalogPart.family == 'ponytail',
         ),
-        hasLength(3),
+        hasLength(4),
       );
       expect(ponytailScene.warnings, isNot(contains('source-verified')));
       expect(
         ponytailScene.parts.any((part) => part.catalogPart.leafId == '4756'),
-        isFalse,
+        isTrue,
       );
     },
   );

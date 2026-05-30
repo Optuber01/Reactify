@@ -118,6 +118,7 @@ void main() {
               descriptor: descriptor,
               state: state,
               scene: scene,
+          tables: tables,
             ),
           ),
         );
@@ -220,7 +221,7 @@ Future<ui.Image> _renderScene(ResolvedScene scene, ui.Size size) async {
         continue;
       }
       canvas.save();
-      canvas.transform(camera.multiply(part.worldTransform).toFloat64List());
+      canvas.transform(camera.multiply(part.localTransform).toFloat64List());
       asset.paint(canvas, part.tintColor);
       canvas.restore();
     }

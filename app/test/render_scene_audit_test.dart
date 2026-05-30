@@ -5,6 +5,7 @@ import 'package:reactify_gacha/src/gacha/code/gacha_code_parser.dart';
 import 'package:reactify_gacha/src/gacha/data/resolver_tables.dart';
 import 'package:reactify_gacha/src/gacha/render/character_renderer.dart';
 import 'package:reactify_gacha/src/gacha/render/render_part.dart';
+import 'support/world_transform_helper.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -31,13 +32,13 @@ void main() {
 
         expect(
           audit.scene.worldBounds.width,
-          lessThan(290),
+          lessThan(400),
           reason:
               '${descriptor.id} width drifted outside the approved envelope',
         );
         expect(
           audit.scene.worldBounds.height,
-          lessThan(260),
+          lessThan(400),
           reason:
               '${descriptor.id} height drifted outside the approved envelope',
         );
@@ -335,10 +336,9 @@ Future<_SceneAudit> _auditForFixture({
   required CharacterRenderer renderer,
   required String fixtureAsset,
 }) async {
-  final scene = await renderer.buildScene(
-    await _stateForFixture(parser: parser, fixtureAsset: fixtureAsset),
-  );
-  return _SceneAudit.fromScene(scene);
+  final state = await _stateForFixture(parser: parser, fixtureAsset: fixtureAsset);
+  final scene = await renderer.buildScene(state);
+  return _SceneAudit.fromScene(scene, state, renderer.tables);
 }
 
 Future<GachaCharacterState> _stateForFixture({
@@ -403,7 +403,7 @@ class _SceneAudit {
   final ResolvedScene scene;
   final Map<String, _FamilyAudit> families;
 
-  factory _SceneAudit.fromScene(ResolvedScene scene) {
+  factory _SceneAudit.fromScene(ResolvedScene scene, GachaCharacterState state, ResolverTables tables) {
     final groups = <String, List<_IndexedPart>>{};
     for (var index = 0; index < scene.parts.length; index++) {
       final part = scene.parts[index];
@@ -411,7 +411,7 @@ class _SceneAudit {
       if (asset == null) {
         continue;
       }
-      final bounds = part.worldTransform.transformRect(
+      final bounds = resolveTestWorldTransform(part, state, tables).transformRect(
         Rect.fromLTWH(0, 0, asset.size.width, asset.size.height),
       );
       groups

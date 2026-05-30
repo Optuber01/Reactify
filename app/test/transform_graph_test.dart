@@ -47,7 +47,7 @@ void main() {
       (part) => part.catalogPart.family == 'front_hair',
     );
 
-    expect(frontHairPart.worldTransform.tx, isNonZero);
-    expect(frontHairPart.worldTransform.ty, isNonZero);
+    expect(frontHairPart.localTransform.tx, isNonZero);
+    expect(frontHairPart.localTransform.ty, isNonZero);
   });
 }

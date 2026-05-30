@@ -152,7 +152,7 @@ Map<String, ui.Rect> _familyBounds(ResolvedScene scene) {
     if (asset == null) {
       continue;
     }
-    final bounds = part.worldTransform.transformRect(
+    final bounds = part.localTransform.transformRect(
       ui.Rect.fromLTWH(0, 0, asset.size.width, asset.size.height),
     );
     result.update(
@@ -191,7 +191,7 @@ Future<ui.Image> _renderScene(ResolvedScene scene, ui.Size size) async {
         continue;
       }
       canvas.save();
-      canvas.transform(camera.multiply(part.worldTransform).toFloat64List());
+      canvas.transform(camera.multiply(part.localTransform).toFloat64List());
       asset.paint(canvas, part.tintColor);
       canvas.restore();
     }

@@ -12,6 +12,7 @@ import 'package:reactify_gacha/src/gacha/render/character_renderer.dart';
 import 'package:reactify_gacha/src/gacha/render/render_part.dart';
 import 'package:reactify_gacha/src/gacha/render/transform_graph.dart';
 import 'package:reactify_gacha/src/gacha/ui/editor_helpers.dart';
+import 'world_transform_helper.dart';
 
 const priorityFixtureIds = <String>[
   'default-girl',
@@ -41,11 +42,13 @@ class PriorityFixtureContext {
     required this.descriptor,
     required this.state,
     required this.scene,
+    required this.tables,
   });
 
   final ValidationCaseDescriptor descriptor;
   final GachaCharacterState state;
   final ResolvedScene scene;
+  final ResolverTables tables;
 }
 
 class GeneratedPriorityAuditArtifacts {
@@ -86,6 +89,7 @@ Future<List<PriorityFixtureContext>> loadPriorityFixtureContexts({
         descriptor: descriptor,
         state: state,
         scene: scene,
+        tables: tables,
       ),
     );
   }
@@ -231,7 +235,7 @@ Map<String, dynamic> auditSummaryWithCatalog({
     tables,
     fixture.state,
   ).toList()..sort();
-  final familyBounds = familyBoundsForScene(fixture.scene);
+  final familyBounds = familyBoundsForScene(fixture.scene, fixture.state, tables);
   final suspicious = <Map<String, dynamic>>[];
   final world = fixture.scene.worldBounds;
   for (final entry in familyBounds.entries) {
@@ -313,14 +317,15 @@ Set<String> unsupportedFamiliesForState(
   return unsupported;
 }
 
-Map<String, Rect> familyBoundsForScene(ResolvedScene scene) {
+Map<String, Rect> familyBoundsForScene(ResolvedScene scene, GachaCharacterState state, ResolverTables tables) {
   final result = <String, Rect>{};
   for (final part in scene.parts) {
     final asset = scene.assets[part.catalogPart.appAssetPath];
     if (asset == null) {
       continue;
     }
-    final bounds = part.worldTransform.transformRect(
+    final worldTransform = resolveTestWorldTransform(part, state, tables);
+    final bounds = worldTransform.transformRect(
       Rect.fromLTWH(0, 0, asset.size.width, asset.size.height),
     );
     result.update(
@@ -343,7 +348,9 @@ Map<String, double> rectJson(Rect rect) => {
 
 Future<ui.Image> renderSceneToImage(
   ResolvedScene scene,
-  ui.Size size, {
+  ui.Size size,
+  GachaCharacterState state,
+  ResolverTables tables, {
   Set<String>? includeFamilies,
   Set<String>? contextFamilies,
   Rect? focusBounds,
@@ -391,8 +398,9 @@ Future<ui.Image> renderSceneToImage(
       if (asset == null) {
         continue;
       }
+      final worldTransform = resolveTestWorldTransform(part, state, tables);
       canvas.save();
-      canvas.transform(camera.multiply(part.worldTransform).toFloat64List());
+      canvas.transform(camera.multiply(worldTransform).toFloat64List());
       asset.paint(canvas, const ui.Color(0x66C8CCD4));
       canvas.restore();
     }
@@ -402,8 +410,9 @@ Future<ui.Image> renderSceneToImage(
       if (asset == null) {
         continue;
       }
+      final worldTransform = resolveTestWorldTransform(part, state, tables);
       canvas.save();
-      canvas.transform(camera.multiply(part.worldTransform).toFloat64List());
+      canvas.transform(camera.multiply(worldTransform).toFloat64List());
       asset.paint(canvas, part.tintColor);
       canvas.restore();
     }
@@ -435,7 +444,7 @@ Future<void> writeContactSheetForFixture({
     ui.Paint()..color = const ui.Color(0xFFF7F8FB),
   );
 
-  final familyBounds = familyBoundsForScene(fixture.scene);
+  final familyBounds = familyBoundsForScene(fixture.scene, fixture.state, fixture.tables);
   final headBounds = familyBounds['head_shape'];
   final bodyBounds = familyBounds['body_base'];
   final effectFamilies = const {'special', 'special2'};
@@ -512,6 +521,8 @@ Future<void> writeContactSheetForFixture({
     final image = await renderSceneToImage(
       fixture.scene,
       panelSize,
+      fixture.state,
+      fixture.tables,
       includeFamilies: panel.includeFamilies,
       contextFamilies: panel.contextFamilies,
       focusBounds: panel.focusBounds,
@@ -541,7 +552,7 @@ Map<String, dynamic> _fixtureAuditJson(
   ResolverTables tables,
   PriorityFixtureContext fixture,
 ) {
-  final familyBounds = familyBoundsForScene(fixture.scene);
+  final familyBounds = familyBoundsForScene(fixture.scene, fixture.state, tables);
   final groups = <Map<String, dynamic>>[];
   for (final groupName in auditGroupOrder) {
     final active = [
@@ -1170,31 +1181,31 @@ Map<String, dynamic>? _runtimeTransformSummary(List<ResolvedRenderPart> parts) {
     return null;
   }
   final tx = parts
-      .map((part) => part.worldTransform.tx)
+      .map((part) => part.localTransform.tx)
       .toList(growable: false);
   final ty = parts
-      .map((part) => part.worldTransform.ty)
+      .map((part) => part.localTransform.ty)
       .toList(growable: false);
   final scaleX = parts
       .map(
         (part) => math.sqrt(
-          part.worldTransform.a * part.worldTransform.a +
-              part.worldTransform.b * part.worldTransform.b,
+          part.localTransform.a * part.localTransform.a +
+              part.localTransform.b * part.localTransform.b,
         ),
       )
       .toList(growable: false);
   final scaleY = parts
       .map(
         (part) => math.sqrt(
-          part.worldTransform.c * part.worldTransform.c +
-              part.worldTransform.d * part.worldTransform.d,
+          part.localTransform.c * part.localTransform.c +
+              part.localTransform.d * part.localTransform.d,
         ),
       )
       .toList(growable: false);
   final rotation = parts
       .map(
         (part) =>
-            math.atan2(part.worldTransform.b, part.worldTransform.a) *
+            math.atan2(part.localTransform.b, part.localTransform.a) *
             180 /
             math.pi,
       )
@@ -1202,7 +1213,7 @@ Map<String, dynamic>? _runtimeTransformSummary(List<ResolvedRenderPart> parts) {
   return {
     'count': parts.length,
     'world_transform_samples': [
-      for (final matrix in parts.take(4).map((part) => part.worldTransform))
+      for (final matrix in parts.take(4).map((part) => part.localTransform))
         matrix.toDebugJson(),
     ],
     'translate_x_range': [tx.reduce(math.min), tx.reduce(math.max)],
@@ -1301,7 +1312,7 @@ Rect? _partsBounds(ResolvedScene scene, List<ResolvedRenderPart> parts) {
     if (asset == null) {
       continue;
     }
-    final bounds = part.worldTransform.transformRect(
+    final bounds = part.localTransform.transformRect(
       Rect.fromLTWH(0, 0, asset.size.width, asset.size.height),
     );
     result = result == null ? bounds : result.expandToInclude(bounds);

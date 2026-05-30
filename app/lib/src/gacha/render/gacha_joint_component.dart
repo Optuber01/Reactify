@@ -43,11 +43,11 @@ class GachaJointComponent extends PositionComponent {
       if (_lastLocalMatrix != localMatrix || _lastTweenAngle != tweenAngle) {
         _lastLocalMatrix = localMatrix;
         _lastTweenAngle = tweenAngle;
-        
-        final radians = tweenAngle * 3.141592653589793 / 180;
+
+        final radians = tweenAngle * 0.017453292519943295;
         final cosVal = math.cos(radians);
         final sinVal = math.sin(radians);
-        
+
         final la = localMatrix.a;
         final lb = localMatrix.b;
         final lc = localMatrix.c;

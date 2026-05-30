@@ -22,11 +22,12 @@ class CsvLoaders {
     final raw = await rootBundle.loadString(assetPath);
     return jsonDecode(raw) as List<dynamic>;
   }
+  static const _crlfConverter = CsvToListConverter(shouldParseNumbers: false, eol: '\r\n');
+  static const _lfConverter = CsvToListConverter(shouldParseNumbers: false, eol: '\n');
 
   static List<Map<String, String>> parseCsv(String raw) {
-    final rows = const CsvToListConverter(
-      shouldParseNumbers: false,
-    ).convert(raw);
+    final converter = raw.contains('\r\n') ? _crlfConverter : _lfConverter;
+    final rows = converter.convert(raw);
     if (rows.isEmpty) {
       return const [];
     }

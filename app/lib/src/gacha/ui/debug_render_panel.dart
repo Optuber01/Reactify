@@ -235,7 +235,7 @@ class DebugRenderPanel extends StatelessWidget {
               text: '$label: ',
               style: const TextStyle(
                 fontWeight: FontWeight.w600,
-                color: Colors.white90,
+                color: Color(0xE6FFFFFF),
               ),
             ),
             TextSpan(

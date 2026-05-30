@@ -180,15 +180,13 @@ class GachaGameCanvas extends FlameGame {
     return '${part.catalogPart.family}|${part.catalogPart.partRole}|${part.catalogPart.leafId}';
   }
 
-  // Interpolate joint rotations smoothly based on timeline scrubber
   void updateAnimations(double time, Map<String, List<GachaKeyframe>> keyframeTracks) {
     jointRotationTweens.clear();
     for (final entry in keyframeTracks.entries) {
       final trackName = entry.key;
       final keyframes = entry.value;
       if (keyframes.isNotEmpty) {
-        final interpolated = TweenEngine.interpolate(keyframes: keyframes, time: time);
-        jointRotationTweens[trackName] = interpolated.angle; // Eased rotation angle
+        jointRotationTweens[trackName] = TweenEngine.interpolateAngle(keyframes: keyframes, time: time);
       }
     }
   }

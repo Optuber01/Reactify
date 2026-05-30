@@ -83,14 +83,12 @@ class VideoExportManager {
     for (var i = 0; i < totalFrames; i++) {
       final t = i / fps;
       
-      // Interpolate joint rotations at frame time t
       final tweens = <String, double>{};
       for (final entry in animationTracks.entries) {
         final trackName = entry.key;
         final keyframes = entry.value;
         if (keyframes.isNotEmpty) {
-          final interpolated = TweenEngine.interpolate(keyframes: keyframes, time: t);
-          tweens[trackName] = interpolated.angle;
+          tweens[trackName] = TweenEngine.interpolateAngle(keyframes: keyframes, time: t);
         }
       }
 

@@ -77,6 +77,38 @@ class TweenEngine {
       curve: endFrame.curve,
     );
   }
+
+  static double interpolateAngle({
+    required List<GachaKeyframe> keyframes,
+    required double time,
+  }) {
+    if (keyframes.isEmpty) return 0.0;
+    if (keyframes.length == 1 || time <= keyframes.first.time) {
+      return keyframes.first.angle;
+    }
+    if (time >= keyframes.last.time) {
+      return keyframes.last.angle;
+    }
+
+    GachaKeyframe? startFrame;
+    GachaKeyframe? endFrame;
+
+    for (var i = 0; i < keyframes.length - 1; i++) {
+      if (time >= keyframes[i].time && time <= keyframes[i + 1].time) {
+        startFrame = keyframes[i];
+        endFrame = keyframes[i + 1];
+        break;
+      }
+    }
+
+    startFrame ??= keyframes.first;
+    endFrame ??= keyframes.last;
+
+    final range = endFrame.time - startFrame.time;
+    final progress = range == 0 ? 0.0 : (time - startFrame.time) / range;
+
+    return lerpDouble(startFrame.angle, endFrame.angle, progress, endFrame.curve);
+  }
 }
 
 class TimelineController {

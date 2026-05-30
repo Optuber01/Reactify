@@ -29,21 +29,11 @@ class CharacterRenderer {
     final assets = await assetStore.loadAll(
       resolvedParts.map((part) => part.catalogPart.appAssetPath).toSet(),
     );
-    Rect? bounds;
-    for (final part in resolvedParts) {
-      final asset = assets[part.catalogPart.appAssetPath];
-      if (asset == null) {
-        continue;
-      }
-      final rect = part.worldTransform.transformRect(
-        Rect.fromLTWH(0, 0, asset.size.width, asset.size.height),
-      );
-      bounds = bounds == null ? rect : bounds.expandToInclude(rect);
-    }
+    final worldBounds = _computeWorldBounds(resolvedParts, assets, state);
     return ResolvedScene(
       parts: resolvedParts,
       assets: assets,
-      worldBounds: bounds ?? Rect.zero,
+      worldBounds: worldBounds,
       warnings: _warningsFor(state, resolvedParts),
     );
   }
@@ -58,11 +48,13 @@ class CharacterRenderer {
       if (!part.matchesStateValue((field) => state.numeric(field))) {
         continue;
       }
-      final matrix = _worldTransformFor(part, state);
+      final matrix = _localTransformFor(part, state);
+      final targetJoint = _targetJointFor(part);
       resolved.add(
         ResolvedRenderPart(
           catalogPart: part,
-          worldTransform: matrix,
+          localTransform: matrix,
+          targetJoint: targetJoint,
           tintColor: TintPipeline.resolveTint(state, part.tintChannel),
           globalDepth: _globalDepthFor(part, state),
         ),
@@ -74,28 +66,58 @@ class CharacterRenderer {
     return resolved;
   }
 
-  AffineMatrix _worldTransformFor(
+  String _targetJointFor(RenderCatalogPart part) {
+    final host = part.hostName.toLowerCase();
+    final scope = part.hostScope.toLowerCase();
+    final family = part.family.toLowerCase();
+
+    if (scope == 'head' || family.contains('eye') || family.contains('eyebrow') || family.contains('hair') || family == 'hat' || family == 'glasses' || family.contains('accessory') || family.contains('other') || family == 'mouth' || family == 'nose' || family == 'blush' || family == 'faceshadow') {
+      return 'head';
+    }
+    if (host.contains('sleeve_front') || host.contains('hand_front') || host.contains('glove_front') || host.contains('wrist_front') || family.contains('weapon_front') || family == 'shield') {
+      return 'forearm_front';
+    }
+    if (host.contains('sleeve_back') || host.contains('hand_back') || host.contains('glove_back') || host.contains('wrist_back') || family.contains('weapon_back')) {
+      return 'forearm_back';
+    }
+    if (host.contains('shoulder_front')) {
+      return 'shoulder_front';
+    }
+    if (host.contains('shoulder_back')) {
+      return 'shoulder_back';
+    }
+    if (host.contains('socks_front') || host.contains('shoe_front') || host.contains('foot_front') || host.contains('knee_front')) {
+      return 'feet_front';
+    }
+    if (host.contains('socks_back') || host.contains('shoe_back') || host.contains('foot_back') || host.contains('knee_back')) {
+      return 'feet_back';
+    }
+    if (host.contains('thigh_front')) {
+      return 'thigh_front';
+    }
+    if (host.contains('thigh_back')) {
+      return 'thigh_back';
+    }
+    if (host.contains('hip') || family.contains('belt')) {
+      return 'hip';
+    }
+    return 'torso';
+  }
+
+  AffineMatrix _localTransformFor(
     RenderCatalogPart part,
     GachaCharacterState state,
   ) {
-    final rootMatrix = _rootCharacterAdjustment(state);
-    final posePlacement = tables.posePlacementFor(
-      pose: state.numeric('pose'),
-      hostName: part.hostScope == 'head' ? 'head' : part.hostName,
-    );
+    final groupMatrix = _groupAdjustmentFor(part, state);
     final headPlacement = part.hostScope == 'head'
         ? tables.headPlacements[part.hostName]
         : null;
-    final poseMatrix = posePlacement?.matrix ?? const AffineMatrix.identity();
-    final groupMatrix = _groupAdjustmentFor(part, state);
     final hostMatrix = headPlacement?.matrix ?? const AffineMatrix.identity();
     final anchorMatrix = part.hostScope == 'pose'
         ? AffineMatrix.translation(part.runtimeAnchorX, part.runtimeAnchorY)
         : const AffineMatrix.identity();
     final slotMatrix = _slotAdjustment(part, state);
-    return rootMatrix
-        .multiply(poseMatrix)
-        .multiply(groupMatrix)
+    return groupMatrix
         .multiply(hostMatrix)
         .multiply(anchorMatrix)
         .multiply(slotMatrix)
@@ -147,22 +169,70 @@ class CharacterRenderer {
     return order;
   }
 
-  AffineMatrix _rootCharacterAdjustment(GachaCharacterState state) {
-    final scaleX = tables.runtimeValueMaps.resolve(
-      field: 'heightx',
-      fieldValue: state.numeric('heightx'),
-      op: 'scaleX',
-      targetContains: 'char.char',
-      fallback: 1,
-    );
-    final scaleY = tables.runtimeValueMaps.resolve(
-      field: 'heighty',
-      fieldValue: state.numeric('heighty'),
-      op: 'scaleY',
-      targetContains: 'char.char',
-      fallback: 1,
-    );
-    return AffineMatrix.scale(scaleX, scaleY);
+
+  Rect _computeWorldBounds(
+    List<ResolvedRenderPart> parts,
+    Map<String, PreparedAsset> assets,
+    GachaCharacterState state,
+  ) {
+    final heightX = tables.runtimeValueMaps.resolve(field: 'heightx', fieldValue: state.numeric('heightx'), op: 'scaleX', targetContains: 'char.char', fallback: 1);
+    final heightY = tables.runtimeValueMaps.resolve(field: 'heighty', fieldValue: state.numeric('heighty'), op: 'scaleY', targetContains: 'char.char', fallback: 1);
+    final rootLocal = AffineMatrix.scale(heightX, heightY);
+    
+    final poseTorso = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'body')?.matrix ?? const AffineMatrix.identity();
+    final poseHead = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'head')?.matrix ?? const AffineMatrix.identity();
+    final poseShoulderFront = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'shoulder_front')?.matrix ?? const AffineMatrix.identity();
+    final poseShoulderBack = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'shoulder_back')?.matrix ?? const AffineMatrix.identity();
+    final poseSleeveFront = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'sleeve_front')?.matrix ?? const AffineMatrix.identity();
+    final poseSleeveBack = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'sleeve_back')?.matrix ?? const AffineMatrix.identity();
+    final poseThighFront = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'thigh_front')?.matrix ?? const AffineMatrix.identity();
+    final poseThighBack = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'thigh_back')?.matrix ?? const AffineMatrix.identity();
+    final poseFeetFront = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'foot_front')?.matrix ?? const AffineMatrix.identity();
+    final poseFeetBack = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'foot_back')?.matrix ?? const AffineMatrix.identity();
+
+    final torsoWorld = rootLocal.multiply(poseTorso);
+    final headWorld = torsoWorld.multiply(poseTorso.inverse().multiply(poseHead));
+    final shoulderFrontWorld = torsoWorld.multiply(poseTorso.inverse().multiply(poseShoulderFront));
+    final shoulderBackWorld = torsoWorld.multiply(poseTorso.inverse().multiply(poseShoulderBack));
+    final forearmFrontWorld = shoulderFrontWorld.multiply(poseShoulderFront.inverse().multiply(poseSleeveFront));
+    final forearmBackWorld = shoulderBackWorld.multiply(poseShoulderBack.inverse().multiply(poseSleeveBack));
+    final hipWorld = torsoWorld;
+    final thighFrontWorld = hipWorld.multiply(poseTorso.inverse().multiply(poseThighFront));
+    final thighBackWorld = hipWorld.multiply(poseTorso.inverse().multiply(poseThighBack));
+    final feetFrontWorld = thighFrontWorld.multiply(poseThighFront.inverse().multiply(poseFeetFront));
+    final feetBackWorld = thighBackWorld.multiply(poseThighBack.inverse().multiply(poseFeetBack));
+
+    var bounds = Rect.zero;
+    var hasBounds = false;
+    
+    for (final part in parts) {
+      final asset = assets[part.catalogPart.appAssetPath];
+      if (asset == null) continue;
+
+      AffineMatrix parentWorld;
+      switch (part.targetJoint) {
+        case 'head': parentWorld = headWorld; break;
+        case 'shoulder_front': parentWorld = shoulderFrontWorld; break;
+        case 'shoulder_back': parentWorld = shoulderBackWorld; break;
+        case 'forearm_front': parentWorld = forearmFrontWorld; break;
+        case 'forearm_back': parentWorld = forearmBackWorld; break;
+        case 'hip': parentWorld = hipWorld; break;
+        case 'thigh_front': parentWorld = thighFrontWorld; break;
+        case 'thigh_back': parentWorld = thighBackWorld; break;
+        case 'feet_front': parentWorld = feetFrontWorld; break;
+        case 'feet_back': parentWorld = feetBackWorld; break;
+        default: parentWorld = torsoWorld; break;
+      }
+      
+      final worldMatrix = parentWorld.multiply(part.localTransform);
+      final b = worldMatrix.transformRect(
+        Rect.fromLTWH(0, 0, asset.size.width, asset.size.height),
+      );
+      bounds = hasBounds ? bounds.expandToInclude(b) : b;
+      hasBounds = true;
+    }
+    
+    return bounds;
   }
 
   AffineMatrix _groupAdjustmentFor(

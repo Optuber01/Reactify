@@ -15,10 +15,16 @@ class AppAssetManifestEntry {
 }
 
 class AppAssetManifest {
-  const AppAssetManifest({required this.generatedOn, required this.entries});
+  AppAssetManifest({required this.generatedOn, required this.entries}) {
+    for (final entry in entries.values) {
+      _appAssetPaths.add(entry.appAssetPath);
+      _appAssetPaths.addAll(entry.aliases);
+    }
+  }
 
   final String generatedOn;
   final Map<String, AppAssetManifestEntry> entries;
+  final Set<String> _appAssetPaths = {};
 
   factory AppAssetManifest.fromJson(Map<String, dynamic> json) {
     final rawEntries = json['entries'] as Map<String, dynamic>;
@@ -47,10 +53,6 @@ class AppAssetManifest {
       entries[originalPath];
 
   bool containsAppAsset(String appAssetPath) {
-    return entries.values.any(
-      (entry) =>
-          entry.appAssetPath == appAssetPath ||
-          entry.aliases.contains(appAssetPath),
-    );
+    return _appAssetPaths.contains(appAssetPath);
   }
 }

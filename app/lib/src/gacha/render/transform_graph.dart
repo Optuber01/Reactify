@@ -100,17 +100,32 @@ class AffineMatrix {
   }
 
   Rect transformRect(Rect rect) {
-    final corners = [
-      transformPoint(rect.topLeft),
-      transformPoint(rect.topRight),
-      transformPoint(rect.bottomLeft),
-      transformPoint(rect.bottomRight),
-    ];
-    final left = corners.map((point) => point.dx).reduce(math.min);
-    final right = corners.map((point) => point.dx).reduce(math.max);
-    final top = corners.map((point) => point.dy).reduce(math.min);
-    final bottom = corners.map((point) => point.dy).reduce(math.max);
-    return Rect.fromLTRB(left, top, right, bottom);
+    final tL = transformPoint(rect.topLeft);
+    final tR = transformPoint(rect.topRight);
+    final bL = transformPoint(rect.bottomLeft);
+    final bR = transformPoint(rect.bottomRight);
+
+    var minX = tL.dx;
+    var maxX = tL.dx;
+    var minY = tL.dy;
+    var maxY = tL.dy;
+
+    if (tR.dx < minX) minX = tR.dx;
+    if (tR.dx > maxX) maxX = tR.dx;
+    if (tR.dy < minY) minY = tR.dy;
+    if (tR.dy > maxY) maxY = tR.dy;
+
+    if (bL.dx < minX) minX = bL.dx;
+    if (bL.dx > maxX) maxX = bL.dx;
+    if (bL.dy < minY) minY = bL.dy;
+    if (bL.dy > maxY) maxY = bL.dy;
+
+    if (bR.dx < minX) minX = bR.dx;
+    if (bR.dx > maxX) maxX = bR.dx;
+    if (bR.dy < minY) minY = bR.dy;
+    if (bR.dy > maxY) maxY = bR.dy;
+
+    return Rect.fromLTRB(minX, minY, maxX, maxY);
   }
 
   Float64List toFloat64List() {

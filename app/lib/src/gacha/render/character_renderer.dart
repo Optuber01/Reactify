@@ -694,12 +694,12 @@ class CharacterRenderer {
 }
 
 class GachaAssetStore {
-  final Map<String, Future<PreparedAsset>> _cache = {};
+  static final Map<String, Future<PreparedAsset>> _globalCache = {};
 
   Future<Map<String, PreparedAsset>> loadAll(Set<String> assetPaths) async {
     final pending = <String, Future<PreparedAsset>>{};
     for (final assetPath in assetPaths) {
-      pending[assetPath] = _cache.putIfAbsent(
+      pending[assetPath] = _globalCache.putIfAbsent(
         assetPath,
         () => _load(assetPath),
       );

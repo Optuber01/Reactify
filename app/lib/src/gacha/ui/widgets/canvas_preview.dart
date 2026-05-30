@@ -73,88 +73,85 @@ class _CanvasPreviewState extends State<CanvasPreview> {
   @override
   Widget build(BuildContext context) {
     widget.game.scene = widget.scene;
+    const borderRadius = BorderRadius.all(Radius.circular(28));
 
     return Container(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF1E262F), Color(0xFF15191E), Color(0xFF0F1216)],
-        ),
-        border: Border.all(color: const Color(0xFF333F4D)),
+        borderRadius: borderRadius,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.5),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
+            color: const Color(0xFF07090C).withValues(alpha: 0.6),
+            blurRadius: 30,
+            offset: const Offset(0, 12),
+          ),
+          BoxShadow(
+            color: const Color(0xFF1E3A8A).withValues(alpha: 0.1),
+            blurRadius: 50,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
-      child: Stack(
-        children: [
-          // Flame view layer
-          Positioned.fill(
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(28),
-              child: GameWidget(game: widget.game),
-            ),
+      child: ClipRRect(
+        borderRadius: borderRadius,
+        child: CustomPaint(
+          foregroundPainter: _CanvasGlassBorderPainter(
+            borderRadius: borderRadius,
+            strokeWidth: 1.5,
           ),
-
-          // Gesture drawing layer
-          if (_drawingMode)
-            Positioned.fill(
-              child: GestureDetector(
-                onPanStart: (details) {
-                  setState(() {
-                    _currentStroke.add(details.localPosition);
-                  });
-                },
-                onPanUpdate: (details) {
-                  setState(() {
-                    _currentStroke.add(details.localPosition);
-                  });
-                },
-                onPanEnd: (details) {
-                  if (_currentStroke.isNotEmpty) {
-                    final simplified = _simplifyPoints(_currentStroke, 1.5);
-                    setState(() {
-                      _allStrokes.add(List.from(simplified));
-                      _currentStroke.clear();
-                    });
-                    widget.onStrokesDrawn(simplified);
-                  }
-                },
-                child: CustomPaint(
-                  painter: _VectorDrawingPainter(
-                    currentStroke: _currentStroke,
-                    allStrokes: _allStrokes,
-                  ),
-                  child: const SizedBox.expand(),
-                ),
+          child: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [Color(0xFF161B22), Color(0xFF0F1216)],
               ),
             ),
-
-          // Glassmorphic toolbar for drawing controls
-          Positioned(
-            top: 16,
-            right: 16,
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    tooltip: 'Drawing Canvas',
-                    icon: Icon(
-                      Icons.brush,
-                      color: _drawingMode ? const Color(0xFF64B5F6) : Colors.white70,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: ClipRRect(
+                    borderRadius: borderRadius,
+                    child: GameWidget(game: widget.game),
+                  ),
+                ),
+                if (_drawingMode)
+                  Positioned.fill(
+                    child: GestureDetector(
+                      onPanStart: (details) {
+                        setState(() {
+                          _currentStroke.add(details.localPosition);
+                        });
+                      },
+                      onPanUpdate: (details) {
+                        setState(() {
+                          _currentStroke.add(details.localPosition);
+                        });
+                      },
+                      onPanEnd: (details) {
+                        if (_currentStroke.isNotEmpty) {
+                          final simplified = _simplifyPoints(_currentStroke, 1.5);
+                          setState(() {
+                            _allStrokes.add(List.from(simplified));
+                            _currentStroke.clear();
+                          });
+                          widget.onStrokesDrawn(simplified);
+                        }
+                      },
+                      child: CustomPaint(
+                        painter: _VectorDrawingPainter(
+                          currentStroke: _currentStroke,
+                          allStrokes: _allStrokes,
+                        ),
+                        child: const SizedBox.expand(),
+                      ),
                     ),
-                    onPressed: () {
+                  ),
+                Positioned(
+                  top: 16,
+                  right: 16,
+                  child: _GlassToolbar(
+                    drawingMode: _drawingMode,
+                    onToggleDrawing: () {
                       setState(() {
                         _drawingMode = !_drawingMode;
                         if (!_drawingMode) {
@@ -162,22 +159,174 @@ class _CanvasPreviewState extends State<CanvasPreview> {
                         }
                       });
                     },
+                    onClear: _clearCanvas,
                   ),
-                  if (_drawingMode) ...[
-                    IconButton(
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _GlassToolbar extends StatelessWidget {
+  const _GlassToolbar({
+    required this.drawingMode,
+    required this.onToggleDrawing,
+    required this.onClear,
+  });
+
+  final bool drawingMode;
+  final VoidCallback onToggleDrawing;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    const borderRadius = BorderRadius.all(Radius.circular(16));
+
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: borderRadius,
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF07090C).withValues(alpha: 0.35),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: borderRadius,
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+          child: CustomPaint(
+            foregroundPainter: _CanvasGlassBorderPainter(
+              borderRadius: borderRadius,
+              strokeWidth: 1.0,
+            ),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    const Color(0xFF1E293B).withValues(alpha: 0.4),
+                    const Color(0xFF0F172A).withValues(alpha: 0.6),
+                  ],
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _SpringToolbarButton(
+                    tooltip: 'Drawing Canvas',
+                    icon: Icon(
+                      Icons.brush,
+                      color: drawingMode ? const Color(0xFF00F5FF) : Colors.white.withValues(alpha: 0.7),
+                      size: 20,
+                    ),
+                    onPressed: onToggleDrawing,
+                  ),
+                  if (drawingMode) ...[
+                    const SizedBox(width: 4),
+                    _SpringToolbarButton(
                       tooltip: 'Clear Custom Strokes',
-                      icon: const Icon(Icons.delete_sweep, color: Colors.white70),
-                      onPressed: _clearCanvas,
+                      icon: Icon(Icons.delete_sweep, color: Colors.white.withValues(alpha: 0.7), size: 20),
+                      onPressed: onClear,
                     ),
                   ],
                 ],
               ),
             ),
           ),
-        ],
+        ),
       ),
     );
   }
+}
+
+class _SpringToolbarButton extends StatefulWidget {
+  const _SpringToolbarButton({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final Widget icon;
+  final VoidCallback onPressed;
+
+  @override
+  State<_SpringToolbarButton> createState() => _SpringToolbarButtonState();
+}
+
+class _SpringToolbarButtonState extends State<_SpringToolbarButton> {
+  double _scale = 1.0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: widget.tooltip,
+      child: GestureDetector(
+        onTapDown: (_) => setState(() => _scale = 0.8),
+        onTapUp: (_) => setState(() => _scale = 1.0),
+        onTapCancel: () => setState(() => _scale = 1.0),
+        onTap: widget.onPressed,
+        child: AnimatedScale(
+          scale: _scale,
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.decelerate,
+          child: Container(
+            width: 36,
+            height: 36,
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+            ),
+            child: Center(child: widget.icon),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CanvasGlassBorderPainter extends CustomPainter {
+  const _CanvasGlassBorderPainter({
+    required this.borderRadius,
+    required this.strokeWidth,
+  });
+
+  final BorderRadius borderRadius;
+  final double strokeWidth;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final rrect = borderRadius.toRRect(rect);
+    final paint = Paint()
+      ..strokeWidth = strokeWidth
+      ..style = PaintingStyle.stroke
+      ..shader = LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          Colors.white.withValues(alpha: 0.28),
+          Colors.white.withValues(alpha: 0.05),
+          Colors.black.withValues(alpha: 0.2),
+          Colors.white.withValues(alpha: 0.14),
+        ],
+        stops: const [0.0, 0.45, 0.5, 1.0],
+      ).createShader(rect);
+
+    canvas.drawRRect(rrect, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _CanvasGlassBorderPainter oldDelegate) =>
+      oldDelegate.borderRadius != borderRadius || oldDelegate.strokeWidth != strokeWidth;
 }
 
 class _VectorDrawingPainter extends CustomPainter {
@@ -192,7 +341,7 @@ class _VectorDrawingPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = const Color(0xFF64B5F6)
+      ..color = const Color(0xFF00F5FF)
       ..strokeWidth = 3.5
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round

@@ -17,8 +17,6 @@ class CollapsibleSidebar extends StatefulWidget {
 
 class _CollapsibleSidebarState extends State<CollapsibleSidebar> with SingleTickerProviderStateMixin {
   bool _isCollapsed = false;
-  bool _isHovered = false;
-
   @override
   Widget build(BuildContext context) {
     final borderRadius = BorderRadius.only(
@@ -26,13 +24,10 @@ class _CollapsibleSidebarState extends State<CollapsibleSidebar> with SingleTick
       bottomLeft: Radius.circular(_isCollapsed ? 16 : 24),
     );
 
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 400),
-        curve: Curves.elasticOut,
-        width: _isCollapsed ? 72 : 340,
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 400),
+      curve: Curves.elasticOut,
+      width: _isCollapsed ? 72 : 340,
         decoration: BoxDecoration(
           borderRadius: borderRadius,
           boxShadow: [
@@ -119,8 +114,7 @@ class _CollapsibleSidebarState extends State<CollapsibleSidebar> with SingleTick
             ),
           ),
         ),
-      ),
-    );
+      );
   }
 }
 

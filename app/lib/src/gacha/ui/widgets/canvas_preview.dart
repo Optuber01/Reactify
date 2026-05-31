@@ -32,7 +32,6 @@ class _CanvasPreviewState extends State<CanvasPreview> {
     });
   }
 
-  // Ramer-Douglas-Peucker algorithm for vector stroke control point simplification
   List<Offset> _simplifyPoints(List<Offset> points, double epsilon) {
     if (points.length < 3) return points;
 
@@ -40,7 +39,11 @@ class _CanvasPreviewState extends State<CanvasPreview> {
     double dmax = 0.0;
 
     for (int i = 1; i < points.length - 1; i++) {
-      double d = _perpendicularDistance(points[i], points[0], points[points.length - 1]);
+      double d = _perpendicularDistance(
+        points[i],
+        points[0],
+        points[points.length - 1],
+      );
       if (d > dmax) {
         dmaxIndex = i;
         dmax = d;
@@ -48,7 +51,10 @@ class _CanvasPreviewState extends State<CanvasPreview> {
     }
 
     if (dmax > epsilon) {
-      final results1 = _simplifyPoints(points.sublist(0, dmaxIndex + 1), epsilon);
+      final results1 = _simplifyPoints(
+        points.sublist(0, dmaxIndex + 1),
+        epsilon,
+      );
       final results2 = _simplifyPoints(points.sublist(dmaxIndex), epsilon);
       return results1.sublist(0, results1.length - 1) + results2;
     } else {
@@ -64,7 +70,9 @@ class _CanvasPreviewState extends State<CanvasPreview> {
       return (p - lineStart).distance;
     }
 
-    double t = ((p.dx - lineStart.dx) * dx + (p.dy - lineStart.dy) * dy) / (dx * dx + dy * dy);
+    double t =
+        ((p.dx - lineStart.dx) * dx + (p.dy - lineStart.dy) * dy) /
+        (dx * dx + dy * dy);
     t = t.clamp(0.0, 1.0);
 
     Offset projection = lineStart + Offset(dx * t, dy * t);
@@ -130,7 +138,10 @@ class _CanvasPreviewState extends State<CanvasPreview> {
                       },
                       onPanEnd: (details) {
                         if (_currentStroke.isNotEmpty) {
-                          final simplified = _simplifyPoints(_currentStroke, 1.5);
+                          final simplified = _simplifyPoints(
+                            _currentStroke,
+                            1.5,
+                          );
                           setState(() {
                             _allStrokes.add(List.from(simplified));
                             _currentStroke.clear();
@@ -226,7 +237,9 @@ class _GlassToolbar extends StatelessWidget {
                     tooltip: 'Drawing Canvas',
                     icon: Icon(
                       Icons.brush,
-                      color: drawingMode ? const Color(0xFF00F5FF) : Colors.white.withValues(alpha: 0.7),
+                      color: drawingMode
+                          ? const Color(0xFF00F5FF)
+                          : Colors.white.withValues(alpha: 0.7),
                       size: 20,
                     ),
                     onPressed: onToggleDrawing,
@@ -235,7 +248,11 @@ class _GlassToolbar extends StatelessWidget {
                     const SizedBox(width: 4),
                     _SpringToolbarButton(
                       tooltip: 'Clear Custom Strokes',
-                      icon: Icon(Icons.delete_sweep, color: Colors.white.withValues(alpha: 0.7), size: 20),
+                      icon: Icon(
+                        Icons.delete_sweep,
+                        color: Colors.white.withValues(alpha: 0.7),
+                        size: 20,
+                      ),
                       onPressed: onClear,
                     ),
                   ],
@@ -283,9 +300,7 @@ class _SpringToolbarButtonState extends State<_SpringToolbarButton> {
           child: Container(
             width: 36,
             height: 36,
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-            ),
+            decoration: const BoxDecoration(shape: BoxShape.circle),
             child: Center(child: widget.icon),
           ),
         ),
@@ -327,7 +342,8 @@ class _CanvasGlassBorderPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _CanvasGlassBorderPainter oldDelegate) =>
-      oldDelegate.borderRadius != borderRadius || oldDelegate.strokeWidth != strokeWidth;
+      oldDelegate.borderRadius != borderRadius ||
+      oldDelegate.strokeWidth != strokeWidth;
 }
 
 class _VectorDrawingPainter extends CustomPainter {
@@ -358,7 +374,8 @@ class _VectorDrawingPainter extends CustomPainter {
     }
 
     if (currentStroke.length >= 2) {
-      final path = Path()..moveTo(currentStroke.first.dx, currentStroke.first.dy);
+      final path = Path()
+        ..moveTo(currentStroke.first.dx, currentStroke.first.dy);
       for (var i = 1; i < currentStroke.length; i++) {
         path.lineTo(currentStroke[i].dx, currentStroke[i].dy);
       }

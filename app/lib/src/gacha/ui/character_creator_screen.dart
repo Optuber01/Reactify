@@ -10,9 +10,6 @@ import '../render/character_renderer.dart';
 import '../render/render_part.dart';
 import '../render/gacha_game_canvas.dart';
 import '../render/gacha_joint_component.dart';
-import '../render/tween_engine.dart';
-import '../render/video_export_manager.dart';
-import 'widgets/timeline_track.dart';
 import 'widgets/collapsible_sidebar.dart';
 import 'widgets/canvas_preview.dart';
 import 'debug_render_panel.dart';
@@ -94,45 +91,6 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
   bool _messageIsError = false;
   int _renderSerial = 0;
 
-  // Animation timeline state
-  double _currentTime = 0.0;
-  final double _maxDuration = 4.0;
-  bool _isPlaying = false;
-  final List<double> _keyframes = [0.0, 1.0, 2.0, 3.0];
-
-  final Map<String, List<GachaKeyframe>> _animationTracks = {
-    'head': [
-      const GachaKeyframe(time: 0.0, position: Offset.zero, scale: Offset(1, 1), angle: 0.0),
-      const GachaKeyframe(time: 1.0, position: Offset.zero, scale: Offset(1, 1), angle: -10.0),
-      const GachaKeyframe(time: 2.0, position: Offset.zero, scale: Offset(1, 1), angle: 10.0),
-      const GachaKeyframe(time: 3.0, position: Offset.zero, scale: Offset(1, 1), angle: 0.0),
-    ],
-    'shoulder_front': [
-      const GachaKeyframe(time: 0.0, position: Offset.zero, scale: Offset(1, 1), angle: 0.0),
-      const GachaKeyframe(time: 1.0, position: Offset.zero, scale: Offset(1, 1), angle: 15.0),
-      const GachaKeyframe(time: 2.0, position: Offset.zero, scale: Offset(1, 1), angle: -15.0),
-      const GachaKeyframe(time: 3.0, position: Offset.zero, scale: Offset(1, 1), angle: 0.0),
-    ],
-    'shoulder_back': [
-      const GachaKeyframe(time: 0.0, position: Offset.zero, scale: Offset(1, 1), angle: 0.0),
-      const GachaKeyframe(time: 1.0, position: Offset.zero, scale: Offset(1, 1), angle: -15.0),
-      const GachaKeyframe(time: 2.0, position: Offset.zero, scale: Offset(1, 1), angle: 15.0),
-      const GachaKeyframe(time: 3.0, position: Offset.zero, scale: Offset(1, 1), angle: 0.0),
-    ],
-    'thigh_front': [
-      const GachaKeyframe(time: 0.0, position: Offset.zero, scale: Offset(1, 1), angle: 0.0),
-      const GachaKeyframe(time: 1.0, position: Offset.zero, scale: Offset(1, 1), angle: 8.0),
-      const GachaKeyframe(time: 2.0, position: Offset.zero, scale: Offset(1, 1), angle: -8.0),
-      const GachaKeyframe(time: 3.0, position: Offset.zero, scale: Offset(1, 1), angle: 0.0),
-    ],
-    'thigh_back': [
-      const GachaKeyframe(time: 0.0, position: Offset.zero, scale: Offset(1, 1), angle: 0.0),
-      const GachaKeyframe(time: 1.0, position: Offset.zero, scale: Offset(1, 1), angle: -8.0),
-      const GachaKeyframe(time: 2.0, position: Offset.zero, scale: Offset(1, 1), angle: 8.0),
-      const GachaKeyframe(time: 3.0, position: Offset.zero, scale: Offset(1, 1), angle: 0.0),
-    ],
-  };
-
   @override
   void initState() {
     super.initState();
@@ -147,99 +105,22 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
     super.dispose();
   }
 
-  void _togglePlayback() {
-    setState(() {
-      _isPlaying = !_isPlaying;
-    });
-    if (_isPlaying) {
-      _runPlaybackLoop();
-    }
-  }
-
-  Future<void> _updateFrameAtTime(double time) async {
-    _game.updateAnimations(time, _animationTracks);
-    final currentState = _currentState;
-    if (currentState == null) return;
-
-    var stateForFrame = currentState;
-
-    // Speech mouth lip-sync animation (cycles every 0.8 seconds)
-    final speechTime = time % 0.8;
-    int mouthOverride = currentState.numeric('mouth');
-    if (speechTime < 0.2) {
-      mouthOverride = 2; // partially open
-    } else if (speechTime < 0.4) {
-      mouthOverride = 5; // wide open
-    } else if (speechTime < 0.6) {
-      mouthOverride = 7; // narrow speak
-    }
-
-    // Dynamic eyes blink animation (every 2.5 seconds, lasts for 0.15s)
-    final blinkTime = time % 2.5;
-    final isBlinking = blinkTime < 0.15;
-    int eyeOverride = currentState.numeric('eyes1x');
-    if (isBlinking) {
-      eyeOverride = 3; // closed eyes
-    }
-
-    if (mouthOverride != currentState.numeric('mouth')) {
-      stateForFrame = stateForFrame.updateNumericField(widget.tables.schema, 'mouth', mouthOverride);
-    }
-    if (isBlinking) {
-      stateForFrame = stateForFrame.updateNumericField(widget.tables.schema, 'eyes1x', eyeOverride);
-      stateForFrame = stateForFrame.updateNumericField(widget.tables.schema, 'eyes2x', eyeOverride);
-    }
-
-    final frameScene = await _renderer.buildScene(stateForFrame);
-    _game.updateScene(frameScene, stateForFrame, widget.tables);
-  }
-
-  void _runPlaybackLoop() async {
-    while (_isPlaying && mounted) {
-      await Future.delayed(const Duration(milliseconds: 33));
-      if (!_isPlaying || !mounted) break;
-      
-      final nextTime = _currentTime + 0.033;
-      final time = nextTime >= _maxDuration ? 0.0 : nextTime;
-
-      // Update Gacha joints, child part local propagation, speech, and blinks natively
-      await _updateFrameAtTime(time);
-
-      setState(() {
-        _currentTime = time;
-      });
-    }
-  }
-
-  void _onTimeChanged(double time) async {
-    await _updateFrameAtTime(time);
-    setState(() {
-      _currentTime = time;
-    });
-  }
-
-  void _addKeyframe() {
-    setState(() {
-      if (!_keyframes.contains(_currentTime)) {
-        _keyframes.add(_currentTime);
-        _keyframes.sort();
-        _messageText = 'Added skeletal keyframe marker at ${_currentTime.toStringAsFixed(2)}s';
-        _messageIsError = false;
-      }
-    });
-  }
-
   void _handleStrokesDrawn(List<Offset> stroke) {
     try {
-      final headJoint = _game.descendants().whereType<GachaJointComponent>().firstWhere((j) => j.name == 'head');
+      final headJoint = _game
+          .descendants()
+          .whereType<GachaJointComponent>()
+          .firstWhere((j) => j.name == 'head');
       headJoint.addDrawingStroke(stroke);
       setState(() {
-        _messageText = 'Rigged vector stroke with ${stroke.length} points directly onto the head joint!';
+        _messageText =
+            'Rigged vector stroke with ${stroke.length} points directly onto the head joint!';
         _messageIsError = false;
       });
     } catch (e) {
       setState(() {
-        _messageText = 'Captured stroke with ${stroke.length} points, but failed to rig onto head joint: $e';
+        _messageText =
+            'Captured stroke with ${stroke.length} points, but failed to rig onto head joint: $e';
         _messageIsError = true;
       });
     }
@@ -274,10 +155,7 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
         gradient: RadialGradient(
           center: Alignment(0.0, -0.6),
           radius: 1.4,
-          colors: [
-            Color(0xFF1B2236),
-            Color(0xFF0C0F12),
-          ],
+          colors: [Color(0xFF1B2236), Color(0xFF0C0F12)],
         ),
       ),
       child: Padding(
@@ -298,54 +176,35 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  // Main canvas & timeline workspace
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                    child: Stack(
                       children: [
-                        Expanded(
-                          child: Stack(
-                            children: [
-                              Positioned.fill(
-                                child: CanvasPreview(
-                                  scene: scene,
-                                  game: _game,
-                                  onStrokesDrawn: _handleStrokesDrawn,
-                                ),
-                              ),
-                              if (_sceneLoading)
-                                Positioned.fill(
-                                  child: DecoratedBox(
-                                    decoration: BoxDecoration(
-                                      color: Colors.black.withValues(alpha: 0.5),
-                                      borderRadius: BorderRadius.circular(28),
-                                    ),
-                                    child: const Center(
-                                      child: CircularProgressIndicator(
-                                        color: Color(0xFF64B5F6),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                            ],
+                        Positioned.fill(
+                          child: CanvasPreview(
+                            scene: scene,
+                            game: _game,
+                            onStrokesDrawn: _handleStrokesDrawn,
                           ),
                         ),
-                        const SizedBox(height: 16),
-                        TimelineTrack(
-                          currentTime: _currentTime,
-                          maxDuration: _maxDuration,
-                          isPlaying: _isPlaying,
-                          onTimeChanged: _onTimeChanged,
-                          onPlaybackToggle: _togglePlayback,
-                          keyframes: _keyframes,
-                          onAddKeyframe: _addKeyframe,
-                        ),
+                        if (_sceneLoading)
+                          Positioned.fill(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.5),
+                                borderRadius: BorderRadius.circular(28),
+                              ),
+                              child: const Center(
+                                child: CircularProgressIndicator(
+                                  color: Color(0xFF64B5F6),
+                                ),
+                              ),
+                            ),
+                          ),
                       ],
                     ),
                   ),
                   const SizedBox(width: 16),
 
-                  // Collapsible inspector sidebar
                   CollapsibleSidebar(
                     title: 'Editing Properties',
                     child: _EditorInspector(
@@ -364,7 +223,6 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
                       selectedField: _selectedField,
                       onImportPressed: _importFromTextarea,
                       onExportPressed: _exportCurrentState,
-                      onExportVideoPressed: _exportVideo,
                       onResetToFixturePressed: _resetToSelectedFixture,
                       onResetToBaselinePressed: _resetToBaseline,
                       onNumericFieldChanged: _updateNumericField,
@@ -459,45 +317,6 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
           'Exported the current 445-field code to the editor buffer.';
       _messageIsError = false;
     });
-  }
-
-  Future<void> _exportVideo() async {
-    final scene = _scene;
-    final currentState = _currentState;
-    if (scene == null || currentState == null) {
-      setState(() {
-        _messageText = 'Failed to export video: scene or state is not loaded.';
-        _messageIsError = true;
-      });
-      return;
-    }
-    setState(() {
-      _sceneLoading = true;
-      _messageText = 'Rendering rigged keyframe animation frame-by-frame...';
-      _messageIsError = false;
-    });
-    try {
-      final path = await VideoExportManager.exportScene(
-        scene: scene,
-        state: currentState,
-        tables: widget.tables,
-        animationTracks: _animationTracks,
-        outputFileName: 'gacha_anim_${DateTime.now().millisecondsSinceEpoch}.mp4',
-        width: 720,
-        height: 1280,
-      );
-      setState(() {
-        _sceneLoading = false;
-        _messageText = 'Video exported successfully to: $path';
-        _messageIsError = false;
-      });
-    } catch (e) {
-      setState(() {
-        _sceneLoading = false;
-        _messageText = 'Failed to export video: $e';
-        _messageIsError = true;
-      });
-    }
   }
 
   Future<void> _resetToBaseline() async {
@@ -634,7 +453,6 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
         _scene = scene;
         _sceneLoading = false;
       });
-      _game.updateAnimations(_currentTime, _animationTracks);
       _game.updateScene(scene, next, widget.tables);
     } catch (error) {
       if (!mounted || serial != _renderSerial) {
@@ -813,7 +631,9 @@ class _SpringDropdownButtonState extends State<_SpringDropdownButton> {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
             color: Colors.white.withValues(alpha: 0.04),
-            border: Border.all(color: const Color(0xFF00F5FF).withValues(alpha: 0.35)),
+            border: Border.all(
+              color: const Color(0xFF00F5FF).withValues(alpha: 0.35),
+            ),
             boxShadow: [
               BoxShadow(
                 color: const Color(0xFF00F5FF).withValues(alpha: 0.05),
@@ -896,7 +716,8 @@ class _HeaderGlassBorderPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _HeaderGlassBorderPainter oldDelegate) =>
-      oldDelegate.borderRadius != borderRadius || oldDelegate.strokeWidth != strokeWidth;
+      oldDelegate.borderRadius != borderRadius ||
+      oldDelegate.strokeWidth != strokeWidth;
 }
 
 class _FixturePickerDialog extends StatefulWidget {
@@ -1075,7 +896,6 @@ class _EditorInspector extends StatelessWidget {
     required this.selectedField,
     required this.onImportPressed,
     required this.onExportPressed,
-    required this.onExportVideoPressed,
     required this.onResetToFixturePressed,
     required this.onResetToBaselinePressed,
     required this.onNumericFieldChanged,
@@ -1099,7 +919,6 @@ class _EditorInspector extends StatelessWidget {
   final String? selectedField;
   final VoidCallback onImportPressed;
   final VoidCallback onExportPressed;
-  final VoidCallback onExportVideoPressed;
   final VoidCallback onResetToFixturePressed;
   final VoidCallback onResetToBaselinePressed;
   final Future<void> Function(String field, int value) onNumericFieldChanged;
@@ -1156,11 +975,6 @@ class _EditorInspector extends StatelessWidget {
                     OutlinedButton(
                       onPressed: onExportPressed,
                       child: const Text('Export To Buffer'),
-                    ),
-                    OutlinedButton.icon(
-                      icon: const Icon(Icons.video_library),
-                      onPressed: onExportVideoPressed,
-                      label: const Text('Export Video (MP4)'),
                     ),
                     OutlinedButton(
                       onPressed: onResetToFixturePressed,
@@ -1797,8 +1611,6 @@ class _PanelCard extends StatelessWidget {
     );
   }
 }
-
-
 
 class _NumericFieldSpec {
   const _NumericFieldSpec(

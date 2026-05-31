@@ -1,20 +1,13 @@
-import 'dart:io';
-import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flame/components.dart';
 import 'package:flutter/painting.dart';
-import 'package:flutter_svg/flutter_svg.dart' as vg;
-import 'character_renderer.dart';
 import 'render_part.dart';
 import 'gacha_vector_cache.dart';
 import 'transform_graph.dart';
-import '../data/resolver_tables.dart';
 
 class GachaJointComponent extends PositionComponent {
-  GachaJointComponent({
-    required this.name,
-  }) {
+  GachaJointComponent({required this.name}) {
     _cachedTransformList[2] = 0.0;
     _cachedTransformList[3] = 0.0;
     _cachedTransformList[6] = 0.0;
@@ -29,128 +22,48 @@ class GachaJointComponent extends PositionComponent {
 
   final String name;
   AffineMatrix localMatrix = const AffineMatrix.identity();
-  double tweenAngle = 0.0;
 
   final Float64List _cachedTransformList = Float64List(16);
   AffineMatrix? _lastLocalMatrix;
-  double? _lastTweenAngle;
 
   @override
   void renderTree(Canvas canvas) {
     if (isMounted) {
       canvas.save();
-      
-      if (_lastLocalMatrix != localMatrix || _lastTweenAngle != tweenAngle) {
+
+      if (_lastLocalMatrix != localMatrix) {
         _lastLocalMatrix = localMatrix;
-        _lastTweenAngle = tweenAngle;
 
-        final radians = tweenAngle * 0.017453292519943295;
-        final cosVal = math.cos(radians);
-        final sinVal = math.sin(radians);
-
-        final la = localMatrix.a;
-        final lb = localMatrix.b;
-        final lc = localMatrix.c;
-        final ld = localMatrix.d;
-        
-        _cachedTransformList[0] = la * cosVal + lc * sinVal;
-        _cachedTransformList[1] = lb * cosVal + ld * sinVal;
-        _cachedTransformList[4] = -la * sinVal + lc * cosVal;
-        _cachedTransformList[5] = -lb * sinVal + ld * cosVal;
+        _cachedTransformList[0] = localMatrix.a;
+        _cachedTransformList[1] = localMatrix.b;
+        _cachedTransformList[4] = localMatrix.c;
+        _cachedTransformList[5] = localMatrix.d;
         _cachedTransformList[12] = localMatrix.tx;
         _cachedTransformList[13] = localMatrix.ty;
       }
-      
+
       canvas.transform(_cachedTransformList);
-      
+
       render(canvas);
       for (final child in children) {
         child.renderTree(canvas);
       }
-      
+
       canvas.restore();
     }
   }
 
-  GachaPartComponent? _swappedPart;
-
-  void swapCustomAsset(String filePath, String assetKind) async {
-    if (_swappedPart != null) {
-      remove(_swappedPart!);
-      _swappedPart = null;
-    }
-
-    PreparedAsset customAsset;
-    final file = File(filePath);
-    if (assetKind == 'svg' || filePath.toLowerCase().endsWith('.svg')) {
-      final pictureInfo = await vg.vg.loadPicture(
-        vg.SvgFileLoader(file),
-        null,
-      );
-      customAsset = SvgPreparedAsset(assetPath: filePath, pictureInfo: pictureInfo);
-    } else {
-      final bytes = await file.readAsBytes();
-      final codec = await ui.instantiateImageCodec(bytes);
-      final frame = await codec.getNextFrame();
-      customAsset = RasterPreparedAsset(assetPath: filePath, image: frame.image);
-    }
-
-    final newPart = ResolvedRenderPart(
-      catalogPart: RenderCatalogPart(
-        family: 'custom_swap',
-        chooserFrame: 1,
-        partRole: 'accessory',
-        orderedPartIndex: 9999,
-        leafId: 'custom',
-        originalAssetPath: filePath,
-        appAssetPath: filePath,
-        assetKind: assetKind,
-        tintChannel: 'none',
-        visibilityRule: '',
-        namePath: 'custom',
-        characterPath: 'custom',
-        depthPath: '9999',
-        framePath: '1',
-        hostScope: 'pose',
-        hostName: name,
-        hostChildName: '',
-        hostDepthPath: '',
-        runtimeAnchorX: 0.0,
-        runtimeAnchorY: 0.0,
-        dependencyField: '',
-        dependencyValue: null,
-        sizeTable: 'eye_standard',
-        rootSpriteId: 'custom',
-        localMatrix: const AffineMatrix.identity(),
-        notes: '',
-      ),
-      localTransform: const AffineMatrix.identity(),
-      targetJoint: name,
-      tintColor: null,
-      globalDepth: 999999,
-    );
-
-    _swappedPart = GachaPartComponent(
-      part: newPart,
-      asset: customAsset,
-      tintColor: null,
-      globalDepth: 999999,
-      localMatrix: const AffineMatrix.identity(),
-    );
-
-    add(_swappedPart!);
-  }
-
-  // Convert global canvas drawing coordinates to local rigged joint coordinates
   void addDrawingStroke(List<Offset> stroke) {
     if (stroke.length < 2) return;
-    
+
     final localPoints = stroke.map((p) {
       final localVec = absoluteToLocal(Vector2(p.dx, p.dy));
       return Offset(localVec.x, localVec.y);
     }).toList();
 
-    final existing = children.whereType<GachaDrawingPartComponent>().firstOrNull;
+    final existing = children
+        .whereType<GachaDrawingPartComponent>()
+        .firstOrNull;
     if (existing != null) {
       existing.addStroke(localPoints);
     } else {
@@ -161,13 +74,18 @@ class GachaJointComponent extends PositionComponent {
 }
 
 class GachaDrawingPartComponent extends PositionComponent {
-  GachaDrawingPartComponent({
-    required List<Offset> initialStroke,
-  }) : super(priority: 9999999) {
+  GachaDrawingPartComponent({required List<Offset> initialStroke})
+    : super(priority: 9999999) {
     addStroke(initialStroke);
   }
 
   final Path _cachedPath = Path();
+  final Paint _paint = Paint()
+    ..color = const Color(0xFF00F5FF)
+    ..strokeWidth = 3.5
+    ..strokeCap = StrokeCap.round
+    ..strokeJoin = StrokeJoin.round
+    ..style = PaintingStyle.stroke;
 
   void addStroke(List<Offset> stroke) {
     if (stroke.length < 2) return;
@@ -179,14 +97,7 @@ class GachaDrawingPartComponent extends PositionComponent {
 
   @override
   void render(Canvas canvas) {
-    final paint = Paint()
-      ..color = const Color(0xFF00F5FF)
-      ..strokeWidth = 3.5
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round
-      ..style = PaintingStyle.stroke;
-
-    canvas.drawPath(_cachedPath, paint);
+    canvas.drawPath(_cachedPath, _paint);
   }
 }
 
@@ -209,6 +120,7 @@ class GachaPartComponent extends PositionComponent {
     _cachedLocalMatrixList[14] = 0.0;
     _cachedLocalMatrixList[15] = 1.0;
     _updateCachedList();
+    _scheduleRasterCache();
   }
 
   ResolvedRenderPart part;
@@ -228,25 +140,66 @@ class GachaPartComponent extends PositionComponent {
   }
 
   ui.Image? _cachedGpuImage;
+  Rect? _cachedGpuSourceRect;
+  Rect? _cachedGpuDestinationRect;
   bool _loadingCache = false;
+  int _cacheSerial = 0;
+  final Paint _paint = Paint();
 
-  void updatePart(ResolvedRenderPart newPart, PreparedAsset? newAsset, AffineMatrix newLocalMatrix) {
+  void updatePart(
+    ResolvedRenderPart newPart,
+    PreparedAsset? newAsset,
+    AffineMatrix newLocalMatrix,
+  ) {
     if (part.catalogPart.appAssetPath != newPart.catalogPart.appAssetPath ||
         tintColor != newPart.tintColor) {
       _cachedGpuImage = null;
+      _cachedGpuSourceRect = null;
+      _cachedGpuDestinationRect = null;
       _loadingCache = false;
     }
 
     part = newPart;
     asset = newAsset;
-    
+
     if (localMatrix != newLocalMatrix) {
       localMatrix = newLocalMatrix;
       _updateCachedList();
     }
-    
+
     tintColor = newPart.tintColor;
     priority = newPart.globalDepth;
+    _scheduleRasterCache();
+  }
+
+  void _scheduleRasterCache() {
+    final currentAsset = asset;
+    if (currentAsset == null || _cachedGpuImage != null || _loadingCache) {
+      return;
+    }
+    _loadingCache = true;
+    final serial = ++_cacheSerial;
+    GachaVectorCache.instance.getRasterized(currentAsset, tintColor).then((
+      image,
+    ) {
+      if (serial != _cacheSerial || asset != currentAsset) {
+        return;
+      }
+      _cachedGpuImage = image;
+      _cachedGpuSourceRect = Rect.fromLTWH(
+        0,
+        0,
+        image.width.toDouble(),
+        image.height.toDouble(),
+      );
+      _cachedGpuDestinationRect = Rect.fromLTWH(
+        0,
+        0,
+        currentAsset.size.width,
+        currentAsset.size.height,
+      );
+      _loadingCache = false;
+    });
   }
 
   @override
@@ -255,26 +208,22 @@ class GachaPartComponent extends PositionComponent {
     canvas.save();
 
     canvas.transform(_cachedLocalMatrixList);
-    
+
     final anchorX = part.catalogPart.runtimeAnchorX;
     final anchorY = part.catalogPart.runtimeAnchorY;
     canvas.translate(anchorX, anchorY);
 
     if (_cachedGpuImage != null) {
-      final paint = Paint();
-      final src = Rect.fromLTWH(0, 0, _cachedGpuImage!.width.toDouble(), _cachedGpuImage!.height.toDouble());
-      final dst = Rect.fromLTWH(0, 0, asset!.size.width, asset!.size.height);
-      canvas.drawImageRect(_cachedGpuImage!, src, dst, paint);
+      canvas.drawImageRect(
+        _cachedGpuImage!,
+        _cachedGpuSourceRect!,
+        _cachedGpuDestinationRect!,
+        _paint,
+      );
     } else {
       asset!.paint(canvas, tintColor);
-      if (!_loadingCache) {
-        _loadingCache = true;
-        GachaVectorCache.instance.getRasterized(asset!, tintColor).then((image) {
-          _cachedGpuImage = image;
-        });
-      }
     }
-    
+
     canvas.restore();
   }
 }

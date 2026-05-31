@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'render_part.dart';
@@ -5,18 +7,17 @@ import 'gacha_joint_component.dart';
 import 'transform_graph.dart';
 import '../code/gacha_character_state.dart';
 import '../data/resolver_tables.dart';
-import 'tween_engine.dart';
 
 class GachaGameCanvas extends FlameGame {
   GachaGameCanvas();
 
   ResolvedScene? _scene;
+  GachaCharacterState? _state;
+  ResolverTables? _tables;
   GachaJointComponent? _rootComponent;
 
-  // Cache components by a unique family role key to keep them persistent
   final Map<String, GachaPartComponent> _componentsByKey = {};
 
-  // Store logical joints
   late GachaJointComponent _torso;
   late GachaJointComponent _head;
   late GachaJointComponent _shoulderFront;
@@ -30,22 +31,39 @@ class GachaGameCanvas extends FlameGame {
   late GachaJointComponent _feetBack;
 
   ResolvedScene? get scene => _scene;
+  int get activePartComponentCount => _componentsByKey.length;
+  AffineMatrix? get rootTransform => _rootComponent?.localMatrix;
 
   set scene(ResolvedScene? newScene) {
     if (_scene == newScene) return;
     _scene = newScene;
   }
 
-  // Update scene in-place (persistent tree updates)
-  void updateScene(ResolvedScene scene, GachaCharacterState state, ResolverTables tables) {
+  @override
+  void onGameResize(Vector2 size) {
+    super.onGameResize(size);
+    final scene = _scene;
+    final state = _state;
+    final tables = _tables;
+    if (scene != null && state != null && tables != null) {
+      updateScene(scene, state, tables);
+    }
+  }
+
+  void updateScene(
+    ResolvedScene scene,
+    GachaCharacterState state,
+    ResolverTables tables,
+  ) {
     _scene = scene;
+    _state = state;
+    _tables = tables;
 
     if (_rootComponent == null) {
       final root = GachaJointComponent(name: 'root');
       _rootComponent = root;
       add(root);
 
-      // Rig physical Gacha skeleton hierarchy
       _torso = GachaJointComponent(name: 'torso');
       _head = GachaJointComponent(name: 'head');
       _shoulderFront = GachaJointComponent(name: 'shoulder_front');
@@ -71,62 +89,121 @@ class GachaGameCanvas extends FlameGame {
       _thighBack.add(_feetBack);
     }
 
-    // 1. Calculate base joint matrices relative to parents
-    final heightX = tables.runtimeValueMaps.resolve(field: 'heightx', fieldValue: state.numeric('heightx'), op: 'scaleX', targetContains: 'char.char', fallback: 1);
-    final heightY = tables.runtimeValueMaps.resolve(field: 'heighty', fieldValue: state.numeric('heighty'), op: 'scaleY', targetContains: 'char.char', fallback: 1);
-    
-    final poseTorso = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'body')?.matrix ?? const AffineMatrix.identity();
-    final poseHead = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'head')?.matrix ?? const AffineMatrix.identity();
-    final poseShoulderFront = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'shoulder_front')?.matrix ?? const AffineMatrix.identity();
-    final poseShoulderBack = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'shoulder_back')?.matrix ?? const AffineMatrix.identity();
-    final poseForearmFront = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'sleeve_front')?.matrix ?? const AffineMatrix.identity();
-    final poseForearmBack = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'sleeve_back')?.matrix ?? const AffineMatrix.identity();
-    final poseThighFront = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'thigh_front')?.matrix ?? const AffineMatrix.identity();
-    final poseThighBack = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'thigh_back')?.matrix ?? const AffineMatrix.identity();
-    final poseFeetFront = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'foot_front')?.matrix ?? const AffineMatrix.identity();
-    final poseFeetBack = tables.posePlacementFor(pose: state.numeric('pose'), hostName: 'foot_back')?.matrix ?? const AffineMatrix.identity();
+    final heightX = tables.runtimeValueMaps.resolve(
+      field: 'heightx',
+      fieldValue: state.numeric('heightx'),
+      op: 'scaleX',
+      targetContains: 'char.char',
+      fallback: 1,
+    );
+    final heightY = tables.runtimeValueMaps.resolve(
+      field: 'heighty',
+      fieldValue: state.numeric('heighty'),
+      op: 'scaleY',
+      targetContains: 'char.char',
+      fallback: 1,
+    );
+    final pose = state.numeric('pose');
+    final poseTorso =
+        tables.posePlacementFor(pose: pose, hostName: 'body')?.matrix ??
+        const AffineMatrix.identity();
+    final poseHead =
+        tables.posePlacementFor(pose: pose, hostName: 'head')?.matrix ??
+        const AffineMatrix.identity();
+    final poseShoulderFront =
+        tables
+            .posePlacementFor(pose: pose, hostName: 'shoulder_front')
+            ?.matrix ??
+        const AffineMatrix.identity();
+    final poseShoulderBack =
+        tables
+            .posePlacementFor(pose: pose, hostName: 'shoulder_back')
+            ?.matrix ??
+        const AffineMatrix.identity();
+    final poseForearmFront =
+        tables.posePlacementFor(pose: pose, hostName: 'sleeve_front')?.matrix ??
+        const AffineMatrix.identity();
+    final poseForearmBack =
+        tables.posePlacementFor(pose: pose, hostName: 'sleeve_back')?.matrix ??
+        const AffineMatrix.identity();
+    final poseThighFront =
+        tables.posePlacementFor(pose: pose, hostName: 'thigh_front')?.matrix ??
+        const AffineMatrix.identity();
+    final poseThighBack =
+        tables.posePlacementFor(pose: pose, hostName: 'thigh_back')?.matrix ??
+        const AffineMatrix.identity();
+    final poseFeetFront =
+        tables.posePlacementFor(pose: pose, hostName: 'foot_front')?.matrix ??
+        const AffineMatrix.identity();
+    final poseFeetBack =
+        tables.posePlacementFor(pose: pose, hostName: 'foot_back')?.matrix ??
+        const AffineMatrix.identity();
 
-    // 2. Set native position, scale, and rotations on logical joints
-    _applyLocalTransform(_rootComponent!, AffineMatrix.scale(heightX, heightY));
+    final rootScale = AffineMatrix.scale(heightX, heightY);
+    final rootMatrix = _viewportTransform(scene).multiply(rootScale);
+    final headLocal = poseTorso.inverse().multiply(poseHead);
+    final shoulderFrontLocal = poseTorso.inverse().multiply(poseShoulderFront);
+    final shoulderBackLocal = poseTorso.inverse().multiply(poseShoulderBack);
+    final forearmFrontLocal = poseShoulderFront.inverse().multiply(
+      poseForearmFront,
+    );
+    final forearmBackLocal = poseShoulderBack.inverse().multiply(
+      poseForearmBack,
+    );
+    final thighFrontLocal = poseTorso.inverse().multiply(poseThighFront);
+    final thighBackLocal = poseTorso.inverse().multiply(poseThighBack);
+    final feetFrontLocal = poseThighFront.inverse().multiply(poseFeetFront);
+    final feetBackLocal = poseThighBack.inverse().multiply(poseFeetBack);
+
+    _applyLocalTransform(_rootComponent!, rootMatrix);
     _applyLocalTransform(_torso, poseTorso);
-    
-    _applyLocalTransform(_head, poseTorso.inverse().multiply(poseHead), tweenKey: 'head');
-
-    // Shoulders relative to Torso
-    _applyLocalTransform(_shoulderFront, poseTorso.inverse().multiply(poseShoulderFront), tweenKey: 'shoulder_front');
-    _applyLocalTransform(_shoulderBack, poseTorso.inverse().multiply(poseShoulderBack), tweenKey: 'shoulder_back');
-
-    // Forearms relative to Shoulders
-    _applyLocalTransform(_forearmFront, poseShoulderFront.inverse().multiply(poseForearmFront), tweenKey: 'forearm_front');
-    _applyLocalTransform(_forearmBack, poseShoulderBack.inverse().multiply(poseForearmBack), tweenKey: 'forearm_back');
-
-    // Hip relative to Torso
+    _applyLocalTransform(_head, headLocal);
+    _applyLocalTransform(_shoulderFront, shoulderFrontLocal);
+    _applyLocalTransform(_shoulderBack, shoulderBackLocal);
+    _applyLocalTransform(_forearmFront, forearmFrontLocal);
+    _applyLocalTransform(_forearmBack, forearmBackLocal);
     _applyLocalTransform(_hip, const AffineMatrix.identity());
+    _applyLocalTransform(_thighFront, thighFrontLocal);
+    _applyLocalTransform(_thighBack, thighBackLocal);
+    _applyLocalTransform(_feetFront, feetFrontLocal);
+    _applyLocalTransform(_feetBack, feetBackLocal);
 
-    // Thighs relative to Hip
-    _applyLocalTransform(_thighFront, poseTorso.inverse().multiply(poseThighFront), tweenKey: 'thigh_front');
-    _applyLocalTransform(_thighBack, poseTorso.inverse().multiply(poseThighBack), tweenKey: 'thigh_back');
+    final jointWorld = <String, AffineMatrix>{
+      'torso': poseTorso,
+      'head': poseTorso.multiply(headLocal),
+      'shoulder_front': poseTorso.multiply(shoulderFrontLocal),
+      'shoulder_back': poseTorso.multiply(shoulderBackLocal),
+      'forearm_front': poseTorso
+          .multiply(shoulderFrontLocal)
+          .multiply(forearmFrontLocal),
+      'forearm_back': poseTorso
+          .multiply(shoulderBackLocal)
+          .multiply(forearmBackLocal),
+      'hip': poseTorso,
+      'thigh_front': poseTorso.multiply(thighFrontLocal),
+      'thigh_back': poseTorso.multiply(thighBackLocal),
+      'feet_front': poseTorso
+          .multiply(thighFrontLocal)
+          .multiply(feetFrontLocal),
+      'feet_back': poseTorso.multiply(thighBackLocal).multiply(feetBackLocal),
+    };
 
-    // Feet relative to Thighs
-    _applyLocalTransform(_feetFront, poseThighFront.inverse().multiply(poseFeetFront), tweenKey: 'foot_front');
-    _applyLocalTransform(_feetBack, poseThighBack.inverse().multiply(poseFeetBack), tweenKey: 'foot_back');
-
-    // 3. Track and update part components dynamically
     final newKeys = <String>{};
     for (final part in scene.parts) {
       final key = _partKey(part);
       newKeys.add(key);
 
-      final targetJoint = _getJointByName(part.targetJoint);
       final asset = scene.assets[part.catalogPart.appAssetPath];
+      final parentMatrix = jointWorld[part.targetJoint] ?? jointWorld['torso']!;
+      final localMatrix = parentMatrix.multiply(part.localTransform);
 
       if (_componentsByKey.containsKey(key)) {
         final comp = _componentsByKey[key]!;
-        comp.updatePart(part, asset, part.localTransform);
-        
-        if (comp.parent != targetJoint) {
+        comp.updatePart(part, asset, localMatrix);
+
+        if (comp.parent != _rootComponent) {
           comp.removeFromParent();
-          targetJoint.add(comp);
+          _rootComponent!.add(comp);
         }
       } else {
         final comp = GachaPartComponent(
@@ -134,61 +211,53 @@ class GachaGameCanvas extends FlameGame {
           asset: asset,
           tintColor: part.tintColor,
           globalDepth: part.globalDepth,
-          localMatrix: part.localTransform,
+          localMatrix: localMatrix,
         );
-        targetJoint.add(comp);
+        _rootComponent!.add(comp);
         _componentsByKey[key] = comp;
       }
     }
 
-    // 4. Remove component nodes no longer active
-    final keysToRemove = _componentsByKey.keys.where((k) => !newKeys.contains(k)).toList();
+    final keysToRemove = _componentsByKey.keys
+        .where((key) => !newKeys.contains(key))
+        .toList();
     for (final key in keysToRemove) {
       final comp = _componentsByKey.remove(key)!;
       comp.removeFromParent();
     }
   }
 
-  GachaJointComponent _getJointByName(String name) {
-    switch (name) {
-      case 'head': return _head;
-      case 'shoulder_front': return _shoulderFront;
-      case 'shoulder_back': return _shoulderBack;
-      case 'forearm_front': return _forearmFront;
-      case 'forearm_back': return _forearmBack;
-      case 'hip': return _hip;
-      case 'thigh_front': return _thighFront;
-      case 'thigh_back': return _thighBack;
-      case 'feet_front': return _feetFront;
-      case 'feet_back': return _feetBack;
-      default: return _torso;
+  AffineMatrix _viewportTransform(ResolvedScene scene) {
+    final bounds = scene.worldBounds;
+    if (size.x <= 0 || size.y <= 0 || bounds.isEmpty) {
+      return const AffineMatrix.identity();
     }
+    const padding = 32.0;
+    final availableWidth = (size.x - padding * 2).clamp(1.0, double.infinity);
+    final availableHeight = (size.y - padding * 2).clamp(1.0, double.infinity);
+    final fitScale = math.max(
+      0.01,
+      math.min(availableWidth / bounds.width, availableHeight / bounds.height),
+    );
+    final cameraX =
+        (size.x - bounds.width * fitScale) * 0.5 - bounds.left * fitScale;
+    final cameraY =
+        (size.y - bounds.height * fitScale) * 0.5 - bounds.top * fitScale;
+    return AffineMatrix.translation(
+      cameraX,
+      cameraY,
+    ).multiply(AffineMatrix.scale(fitScale, fitScale));
   }
 
-  // Animation tween offsets
-  final Map<String, double> jointRotationTweens = {};
-
-  // Set local matrix and tween angle directly on the GachaJointComponent
-  void _applyLocalTransform(GachaJointComponent component, AffineMatrix matrix, {String? tweenKey}) {
+  void _applyLocalTransform(
+    GachaJointComponent component,
+    AffineMatrix matrix,
+  ) {
     component.localMatrix = matrix;
-    component.tweenAngle = (tweenKey != null && jointRotationTweens.containsKey(tweenKey)) 
-        ? jointRotationTweens[tweenKey]! 
-        : 0.0;
   }
 
   String _partKey(ResolvedRenderPart part) {
     return '${part.catalogPart.family}|${part.catalogPart.partRole}|${part.catalogPart.leafId}';
-  }
-
-  void updateAnimations(double time, Map<String, List<GachaKeyframe>> keyframeTracks) {
-    jointRotationTweens.clear();
-    for (final entry in keyframeTracks.entries) {
-      final trackName = entry.key;
-      final keyframes = entry.value;
-      if (keyframes.isNotEmpty) {
-        jointRotationTweens[trackName] = TweenEngine.interpolateAngle(keyframes: keyframes, time: time);
-      }
-    }
   }
 
   @override

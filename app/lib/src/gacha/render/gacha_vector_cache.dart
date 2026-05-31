@@ -7,6 +7,7 @@ class GachaVectorCache {
   GachaVectorCache._();
 
   final Map<String, ui.Image> _gpuCache = {};
+  final Map<String, Future<ui.Image>> _pendingGpuCache = {};
 
   String _cacheKey(String path, Color? tintColor) {
     final hex = tintColor?.toARGB32().toRadixString(16) ?? 'none';
@@ -18,14 +19,28 @@ class GachaVectorCache {
     if (_gpuCache.containsKey(key)) {
       return _gpuCache[key]!;
     }
-
-    if (_gpuCache.length >= 150) {
-      final firstKey = _gpuCache.keys.first;
-      final oldImage = _gpuCache.remove(firstKey);
-      oldImage?.dispose();
+    final pending = _pendingGpuCache[key];
+    if (pending != null) {
+      return pending;
     }
 
-    // Rasterize at 2x resolution for locked 60 FPS visual premium fidelity
+    final future = _rasterize(asset, tintColor);
+    _pendingGpuCache[key] = future;
+    try {
+      final image = await future;
+      if (_gpuCache.length >= 150) {
+        final firstKey = _gpuCache.keys.first;
+        final oldImage = _gpuCache.remove(firstKey);
+        oldImage?.dispose();
+      }
+      _gpuCache[key] = image;
+      return image;
+    } finally {
+      _pendingGpuCache.remove(key);
+    }
+  }
+
+  Future<ui.Image> _rasterize(PreparedAsset asset, Color? tintColor) async {
     const scale = 2.0;
     final width = (asset.size.width * scale).ceil();
     final height = (asset.size.height * scale).ceil();
@@ -38,8 +53,7 @@ class GachaVectorCache {
 
     final picture = recorder.endRecording();
     final image = await picture.toImage(width, height);
-
-    _gpuCache[key] = image;
+    picture.dispose();
     return image;
   }
 }

@@ -1,69 +1,92 @@
-# Gacha Studio Agent Guidelines
+# Reactify Agent Guide
 
-This is a living, git-ignored documentation file for all AI coding agents working on the Reactify project. Every agent **must** read this file in full before performing any work, and **must** update this file with new lessons, architectural decisions, or surprise findings as they are discovered.
+Read this file before working in this repository. Keep it concise and update it only when a durable project lesson or architecture decision changes how future agents should work.
 
----
+## Workflow Rules
 
-## 1. Git & Workflow Standards
+- Work on branches named `Optuber/<short-topic>`, never directly on `master` or `main`.
+- Submit work as draft PRs unless the user explicitly approves otherwise.
+- Keep changes small, reversible, and source-backed.
+- Do not add code comments.
+- Do not use emojis.
+- Do not hardcode per-character visual nudges.
+- Do not claim full Gacha Club parity unless visual comparison supports it.
+- Passing tests is necessary but not sufficient; visual correctness matters.
+- Preserve user or previous-agent changes unless the user explicitly asks for cleanup.
 
-### Branching & PRs
-- **Branch Naming:** All work must be performed on a branch starting with the prefix `Optuber/` followed by a concise description (e.g., `Optuber/flame-architecture-migration`, `Optuber/ui-modernization`). Never exceed more than 3 words.
-- **Target Branch:** Never make commits or push directly to `master` or `main`.
-- **Draft PRs Only:** All changes must be submitted via **Draft Pull Requests** on GitHub. Do not submit final PRs unless explicitly approved by the user.
+## Dependency Rules
 
-### Commit Signing Notes
-This Windows environment has Git configured for SSH commit signing:
-- `gpg.format=ssh`
-- `commit.gpgsign=true`
-- The global `user.signingkey` is an SSH public key.
-- 1Password CLI is installed, but **agents must not attempt to retrieve or type private credentials** from 1Password.
-- Signed commits may trigger a desktop/Windows Hello prompt for the user to approve key usage.
-- **Fallback:** If commit signing prompts freeze, time out, or fail (e.g., if the user is away and cannot approve Hello), bypass signing with unsigned atomic commits
+- Be cautious with new dependencies.
+- Do not add or upgrade packages released less than one week ago unless there is a verified critical security fix.
+- Before adding or upgrading a package, check current web sources for compromise/security alerts.
+- If a package is small or easy to reproduce, prefer local code over dependency bloat.
 
-### Work Style
-Work style:
-- Keep everything simple, clean, and efficient.
-- Minimize code changes.
-- Do not change unnecessary files.
-- NEVER add code comments.
-- NEVER use emojis.
-- Use atomic commits only. Keep changes isolated and easily reversable.
-- Commit messages should sound human, short, and natural. No overly polished or verbose style.
-- Follow existing project standards exactly. Do not invent new patterns if the repo already has one.
-- Study first, implement second.
+## Current Product Direction
 
----
+Reactify is a 2D character creator and reaction-video studio, not a 3D app.
 
-## 2. Package Management & Security Protocol
+The current Gacha Club renderer should be treated as a legacy compatibility layer and visual-reference adapter. The long-term product should use a Reactify-native 2D puppet architecture:
 
-We maintain a strict security policy regarding dependencies:
-1. **Safety First:** Be extremely cautious of dependency vulnerabilities and package compromises.
-2. **Age Threshold:** Never upgrade to a package version released less than **1 week** ago, unless it contains an actively verified critical security fix.
-3. **Audit Check:** Before upgrading or adding any package, search web sources to ensure the package has no active compromise alerts.
-4. **Copy Code Locally:** If a package is small, easily reproducible, or carries any dependency bloat/security concerns, **do not add it to `pubspec.yaml`**. Instead, copy/re-write the code locally into the codebase to keep dependencies minimal and secure.
+- Gacha Club 445-field code import/export remains supported for backwards compatibility.
+- Imported Gacha characters should migrate into a richer Reactify character model.
+- Reactify-native characters should use reusable rig templates, slots, anchors, tint channels, layer ordering, custom slots, and custom assets.
+- Live editing should favor cached/rasterized layers for performance.
+- Source/project data should preserve vector structure where possible for high-quality SVG/PNG/video export.
+- The editor should eventually support editable scenes, multi-character reaction layouts, reusable expressions, poses, dialogue/timeline state, and later video assembly.
 
----
+## Current Technical Baseline
 
-## 3. Project Archetype & Unified Design Patterns
+Flutter app root:
 
-This is a highly greenfield project ("super new/green"). Changing the schema, refactoring data loaders, or modifying the architecture entirely is **fully encouraged** if it leads to a cleaner, faster, and more maintainable code structure.
+- `app`
 
-### Unified Rendering & State Patterns
-- We do not allow multiple different ways of implementing similar features. 
-- Renderers must not contain hardcoded character-specific offsets or hacks. All layouts, positions, and offsets must be schema-driven from asset metadata.
-- **Target Architecture:** Transition from Flutter's standard CustomPainter rendering to the **Flame Engine** (using a native `GameWidget` and hierarchical `PositionComponent` tree running on Flutter's Impeller GPU backend).
+Original reference/source/assets:
 
----
+- `D:\Client Projects\reactify\REFRENCES\Some gacha App`
 
-## 4. Agent Maintenance & Lessons Learned
+Important areas:
 
-The role of this file is to describe common mistakes, surprise edge cases, and confusion points that agents encounter. 
+- Code parsing/state: `app/lib/src/gacha/code`
+- Data loading: `app/lib/src/gacha/data`
+- Renderer: `app/lib/src/gacha/render`
+- UI: `app/lib/src/gacha/ui`
+- Generated app data: `app/assets/data`
+- Fixtures: `app/fixtures`
+- Render parity outputs: `app/tmp/render_exports`
+- Generators: `tools`
+- Research docs: `docs`
 
-> [!IMPORTANT]
-> **Surprise Alert Rule:** If you encounter anything in this codebase that surprises you or differs from standard expectations, alert the developer and document the finding in this section to guide future agents. Keep the entries concise and clean so this file never goes out of date.
+The current branch contains a Flame-based live renderer. It resolves a Flash-like draw list, then displays flattened drawable parts under a Flame root while keeping a logical joint tree for pose propagation. This is useful as a compatibility milestone, but it is not the final Reactify-native character architecture.
 
-### Lessons Log:
-- **30 May 2026. 12:25 AM GMT +3:00:** Re-architected flat skeletal joints into a 12-bone parent-child hierarchical tree. Discovered that Flame coordinates propagation can be calculated by applying inverse world parent transforms locally, resulting in exact GPU rendering parity while using custom order depth priority traversal. Found that on Windows environments, the Flutter toolchain fails to create plugin symlinks without elevated permissions, which can be elegantly bypassed during testing/running by temporarily renaming the `/app/windows` platform directory.
-- **30 May 2026. 02:40 PM GMT +3:00:** Optimized rendering frame lifecycles by caching Float64List transforms and performing direct arithmetic rotation multiplications in-place inside `GachaJointComponent` and `GachaPartComponent`, fully preventing heap list allocations. Upgraded UI harness panels, timeline, color picker, and toolbar panels with BackdropFilters, diagonal reflection CustomPainters, and spring-physics AnimatedScales to achieve Apple's premium Liquid Glass design language. Optimized rigging vector drawings by caching pre-compiled Path geometry inside `GachaDrawingPartComponent`, completely eliminating path creation stutters during render loops. Discovered that keyframe timeline scrubber dragging triggers massive object allocations due to `GachaKeyframe` object creation during interpolation; resolved this by implementing a primitive-based `interpolateAngle` method inside `TweenEngine` that returns double-precision values directly with zero heap allocations.
-- **30 May 2026. 07:20 PM GMT +3:00:** Discovered that path token and frame parsing in `EyeRenderer` created massive list and string allocations per frame; resolved by implementing unified static `Map` caches to reuse pre-parsed tokens/frames. Uncovered that `TintPipeline` visibility rules compiled and matched expensive regular expressions per frame for every active catalog part; implemented a zero-RegExp `_VisibilityClause` pre-parsed cache, completely freeing the render pipeline from RegExp allocation stutters. Discovered that the SWF layout table verification loop performed `O(N)` linear searches over thousands of asset manifest entries; refactored `AppAssetManifest` to build a pre-hashed `Set` of all active and aliased paths, reducing contains checks to instant `O(1)` speed and slashing app boot latency. Optimized video exporter sorting logic by hoisting part depth sorting out of the sequential multi-frame capture loop into a single pre-run pass. Upgraded keyframe interpolation from `O(N)` linear array scans to a super fast `O(log N)` binary search. Modernized `DebugRenderPanel` container structure with frosted slate gradients and glossy border custom painters to match high-fidelity Liquid Glass aesthetics. Discovered that the repository contains 17,544 tracked files, where 17,293 are static vector assets (.svg, .png) and only 48 are Dart code files (28 source, 20 test). Sweep operations should focus on optimizing the 28 core engine/UI Dart files.
-- **31 May 2026. 05:30 AM GMT +3:00:** Discovered that the live Flame canvas path had no viewport fit transform and nested drawable components could not guarantee exact global `globalDepth` ordering across joints. Resolved the blank/offscreen canvas by fitting the root from `ResolvedScene.worldBounds`, flattening drawable parts under the root with joint-composed local matrices, and keeping the logical joint tree for pose propagation. Removed the premature timeline/keyframe/video exporter stack from the live editor. Web verification exposed a separate platform trap: desktop-only file APIs must stay behind conditional imports, and `SvgAssetLoader` can stall in built web/headless verification, so SVGs are now loaded through `rootBundle.loadString` before parsing.
+## Known Compatibility Status
+
+- The app imports and exports canonical Gacha Club 445-field character codes.
+- The app renders characters from generated catalogs/assets.
+- Built-in fixtures and visual parity exports exist.
+- Full visual parity is not achieved.
+- Known remaining mismatch areas include hats/top accessories, face accessories, props/weapons, some lower clothing layers, pose/limb alignment, and unsupported `special` / `special2`.
+- Do not trust "resolved family exists" as proof of compatibility. A family can resolve while using the wrong asset, frame, transform, tint, depth, host, or nested filter.
+
+## Validation Commands
+
+Run from `app` when Flutter is available:
+
+- `dart format lib test`
+- `flutter analyze`
+- `flutter test`
+- `$env:RUN_FULL_BUILTIN_EXPORT='1'; flutter test test\builtin_render_export_test.dart`
+- `flutter test test\gacha_dj_girl_visual_parity_test.dart`
+- `flutter build windows`
+
+If Flutter is not on PATH, report that clearly instead of pretending validation passed.
+
+## Important Lessons
+
+- Flame coordinates can preserve GPU rendering parity when parent-child pose transforms are derived from inverse world parent transforms, but global draw ordering still needs an explicit flattened depth order.
+- Windows Flutter plugin symlink creation can fail without elevated permissions; prior testing sometimes bypassed this by temporarily renaming `/app/windows`.
+- The repo is asset-heavy. Most tracked files are static SVG/PNG assets; performance work should focus first on the small set of core Dart renderer/data/UI files.
+- SVG registration/viewBox preservation is important for parity.
+- `SvgAssetLoader` can stall in built web/headless verification; current loading uses `rootBundle.loadString` before SVG parsing.
+- `fronthairrot` is a source-backed frame selector, not geometric rotation.
+- Back hair and ponytail previously double-applied editable target transforms; similar bugs can occur when Flash runtime controls an inner editable target while generated local matrices also bake that target placement.
+- Numeric transform comparison against source traces is preferred over guessed offsets.

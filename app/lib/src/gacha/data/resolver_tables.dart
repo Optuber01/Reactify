@@ -211,9 +211,18 @@ class RuntimeValueRule {
 }
 
 class RuntimeValueMaps {
-  const RuntimeValueMaps(this.rules);
+  RuntimeValueMaps(this.rules) {
+    for (final rule in rules) {
+      final opRules = _rulesByKey.putIfAbsent(
+        _key(rule.field, rule.matchValue, rule.op),
+        () => <RuntimeValueRule>[],
+      );
+      opRules.add(rule);
+    }
+  }
 
   final List<RuntimeValueRule> rules;
+  final Map<String, List<RuntimeValueRule>> _rulesByKey = {};
 
   double? resolveOrNull({
     required String field,
@@ -221,12 +230,11 @@ class RuntimeValueMaps {
     required String op,
     String? targetContains,
   }) {
-    for (final rule in rules) {
-      if (rule.field != field ||
-          rule.op != op ||
-          rule.matchValue != fieldValue) {
-        continue;
-      }
+    final candidates = _rulesByKey[_key(field, fieldValue, op)];
+    if (candidates == null) {
+      return null;
+    }
+    for (final rule in candidates) {
       if (targetContains != null && !rule.target.contains(targetContains)) {
         continue;
       }
@@ -249,6 +257,10 @@ class RuntimeValueMaps {
           targetContains: targetContains,
         ) ??
         fallback;
+  }
+
+  static String _key(String field, int fieldValue, String op) {
+    return '$field|$fieldValue|$op';
   }
 }
 

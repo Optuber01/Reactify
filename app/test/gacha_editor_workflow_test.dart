@@ -1,8 +1,10 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flame/extensions.dart';
 import 'package:reactify_gacha/src/gacha/code/gacha_code_parser.dart';
 import 'package:reactify_gacha/src/gacha/data/resolver_tables.dart';
 import 'package:reactify_gacha/src/gacha/render/character_renderer.dart';
+import 'package:reactify_gacha/src/gacha/render/gacha_game_canvas.dart';
 import 'package:reactify_gacha/src/gacha/ui/editor_helpers.dart';
 
 void main() {
@@ -127,6 +129,27 @@ void main() {
     expect(hiddenHairFamilies.contains('rear_hair'), isFalse);
     expect(visibleFamilies.contains('body_base'), isTrue);
     expect(hiddenBodyFamilies.contains('body_base'), isFalse);
+  });
+
+  test('flame canvas builds a fitted live scene graph', () async {
+    final source = await fixture('fixtures/default_boy.gc.txt');
+    final state = parser.parse(source);
+    final scene = await renderer.buildScene(state);
+    final game = GachaGameCanvas();
+
+    game.onGameResize(Vector2(1000, 1200));
+    game.updateScene(scene, state, tables);
+
+    final rootTransform = game.rootTransform;
+    expect(scene.worldBounds.isEmpty, isFalse);
+    expect(game.activePartComponentCount, scene.parts.length);
+    expect(rootTransform, isNotNull);
+    expect(rootTransform!.a.isFinite, isTrue);
+    expect(rootTransform.d.isFinite, isTrue);
+    expect(rootTransform.tx.isFinite, isTrue);
+    expect(rootTransform.ty.isFinite, isTrue);
+    expect(rootTransform.a, greaterThan(0));
+    expect(rootTransform.d, greaterThan(0));
   });
 
   test('transform control fields update exported fields', () async {

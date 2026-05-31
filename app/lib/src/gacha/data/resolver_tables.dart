@@ -1,10 +1,10 @@
 import '../code/gacha_field_schema.dart';
-import 'dart:io';
 import 'dart:math' as math;
 
 import '../render/transform_graph.dart';
 import 'asset_manifest.dart';
 import 'csv_loaders.dart';
+import 'platform_file_exists.dart';
 
 class RenderCatalogPart {
   const RenderCatalogPart({
@@ -600,7 +600,7 @@ class ResolverTables {
         );
       }
       if (!assetManifest.containsAppAsset(part.appAssetPath) &&
-          !File(part.appAssetPath).existsSync()) {
+          !localFileExists(part.appAssetPath)) {
         throw StateError('Asset manifest missing ${part.appAssetPath}');
       }
     }

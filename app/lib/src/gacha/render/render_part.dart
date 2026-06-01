@@ -10,6 +10,7 @@ class ResolvedRenderPart {
     required this.targetJoint,
     required this.tintColor,
     required this.globalDepth,
+    this.sceneTransform = const AffineMatrix.identity(),
   });
 
   final RenderCatalogPart catalogPart;
@@ -17,6 +18,7 @@ class ResolvedRenderPart {
   final String targetJoint;
   final Color? tintColor;
   final int globalDepth;
+  final AffineMatrix sceneTransform;
 
   Map<String, Object?> toDebugJson() {
     return {
@@ -33,6 +35,7 @@ class ResolvedRenderPart {
         'y': catalogPart.runtimeAnchorY,
       },
       'localTransform': localTransform.toDebugJson(),
+      'sceneTransform': sceneTransform.toDebugJson(),
       'targetJoint': targetJoint,
       'depth': globalDepth,
     };

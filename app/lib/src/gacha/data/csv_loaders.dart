@@ -22,8 +22,15 @@ class CsvLoaders {
     final raw = await rootBundle.loadString(assetPath);
     return jsonDecode(raw) as List<dynamic>;
   }
-  static const _crlfConverter = CsvToListConverter(shouldParseNumbers: false, eol: '\r\n');
-  static const _lfConverter = CsvToListConverter(shouldParseNumbers: false, eol: '\n');
+
+  static const _crlfConverter = CsvToListConverter(
+    shouldParseNumbers: false,
+    eol: '\r\n',
+  );
+  static const _lfConverter = CsvToListConverter(
+    shouldParseNumbers: false,
+    eol: '\n',
+  );
 
   static List<Map<String, String>> parseCsv(String raw) {
     final converter = raw.contains('\r\n') ? _crlfConverter : _lfConverter;

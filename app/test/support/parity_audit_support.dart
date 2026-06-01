@@ -235,7 +235,11 @@ Map<String, dynamic> auditSummaryWithCatalog({
     tables,
     fixture.state,
   ).toList()..sort();
-  final familyBounds = familyBoundsForScene(fixture.scene, fixture.state, tables);
+  final familyBounds = familyBoundsForScene(
+    fixture.scene,
+    fixture.state,
+    tables,
+  );
   final suspicious = <Map<String, dynamic>>[];
   final world = fixture.scene.worldBounds;
   for (final entry in familyBounds.entries) {
@@ -317,7 +321,11 @@ Set<String> unsupportedFamiliesForState(
   return unsupported;
 }
 
-Map<String, Rect> familyBoundsForScene(ResolvedScene scene, GachaCharacterState state, ResolverTables tables) {
+Map<String, Rect> familyBoundsForScene(
+  ResolvedScene scene,
+  GachaCharacterState state,
+  ResolverTables tables,
+) {
   final result = <String, Rect>{};
   for (final part in scene.parts) {
     final asset = scene.assets[part.catalogPart.appAssetPath];
@@ -444,7 +452,11 @@ Future<void> writeContactSheetForFixture({
     ui.Paint()..color = const ui.Color(0xFFF7F8FB),
   );
 
-  final familyBounds = familyBoundsForScene(fixture.scene, fixture.state, fixture.tables);
+  final familyBounds = familyBoundsForScene(
+    fixture.scene,
+    fixture.state,
+    fixture.tables,
+  );
   final headBounds = familyBounds['head_shape'];
   final bodyBounds = familyBounds['body_base'];
   final effectFamilies = const {'special', 'special2'};
@@ -552,7 +564,11 @@ Map<String, dynamic> _fixtureAuditJson(
   ResolverTables tables,
   PriorityFixtureContext fixture,
 ) {
-  final familyBounds = familyBoundsForScene(fixture.scene, fixture.state, tables);
+  final familyBounds = familyBoundsForScene(
+    fixture.scene,
+    fixture.state,
+    tables,
+  );
   final groups = <Map<String, dynamic>>[];
   for (final groupName in auditGroupOrder) {
     final active = [

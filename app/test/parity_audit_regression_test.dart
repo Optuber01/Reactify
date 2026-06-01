@@ -156,7 +156,11 @@ void main() {
         'yuni',
       ]) {
         final fixture = _fixtureById(fixtures, fixtureId);
-        final bounds = familyBoundsForScene(fixture.scene, fixture.state, tables);
+        final bounds = familyBoundsForScene(
+          fixture.scene,
+          fixture.state,
+          tables,
+        );
         final head = bounds['head_shape'];
         expect(head, isNotNull, reason: fixtureId);
         for (final family in [
@@ -235,7 +239,11 @@ void main() {
         'gacha-dj-boy',
       ]) {
         final fixture = _fixtureById(fixtures, fixtureId);
-        final bounds = familyBoundsForScene(fixture.scene, fixture.state, tables);
+        final bounds = familyBoundsForScene(
+          fixture.scene,
+          fixture.state,
+          tables,
+        );
         final head = bounds['head_shape'];
         expect(head, isNotNull, reason: fixtureId);
 

@@ -6,10 +6,14 @@ import '../code/gacha_character_state.dart';
 import '../code/gacha_code_parser.dart';
 import '../code/gacha_field_schema.dart';
 import '../data/resolver_tables.dart';
+import '../../reactify/legacy/gacha_to_reactify_adapter.dart';
+import '../../reactify/model/reactify_document.dart';
+import '../../reactify/render/reactify_render_bridge.dart';
 import '../render/character_renderer.dart';
-import '../render/render_part.dart';
 import '../render/gacha_game_canvas.dart';
 import '../render/gacha_joint_component.dart';
+import '../render/render_part.dart';
+import '../render/transform_graph.dart';
 import 'widgets/collapsible_sidebar.dart';
 import 'widgets/canvas_preview.dart';
 import 'debug_render_panel.dart';
@@ -74,6 +78,12 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
     tables: widget.tables,
     assetStore: widget.assetStore,
   );
+  late final GachaToReactifyAdapter _reactifyAdapter = GachaToReactifyAdapter(
+    renderer: _renderer,
+  );
+  late final ReactifyRenderBridge _reactifyBridge = ReactifyRenderBridge(
+    assetStore: widget.assetStore,
+  );
 
   final GachaGameCanvas _game = GachaGameCanvas();
   final TextEditingController _codeController = TextEditingController();
@@ -85,6 +95,8 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
   String? _selectedField;
   GachaCharacterState? _baselineState;
   GachaCharacterState? _currentState;
+  ReactifyCharacterDocument? _reactifyCharacter;
+  int _reactifyResolvedPartCount = 0;
   ResolvedScene? _scene;
   bool _sceneLoading = false;
   String? _messageText;
@@ -169,6 +181,8 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
               cases: widget.tables.editorFixtures,
               changeCount: changes.length,
               resolvedPartCount: scene.parts.length,
+              nativeSlotCount: _reactifyCharacter?.slots.length ?? 0,
+              nativePartCount: _reactifyResolvedPartCount,
               onChanged: _loadFixture,
             ),
             const SizedBox(height: 16),
@@ -446,11 +460,32 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
     });
     try {
       final scene = await _renderer.buildScene(next);
+      final reactifyCharacter = _reactifyAdapter.migrate(
+        next,
+        id: 'char.current',
+      );
+      final reactifyScene = const ReactifySceneDocument(
+        id: 'scene.current',
+        name: 'Current Character',
+        characters: [
+          ReactifySceneCharacter(
+            id: 'scene_char.current',
+            characterId: 'char.current',
+            transform: AffineMatrix.identity(),
+          ),
+        ],
+      );
+      final reactifyResolvedPartCount = _reactifyBridge.resolveSceneParts(
+        reactifyScene,
+        {reactifyCharacter.id: reactifyCharacter},
+      ).length;
       if (!mounted || serial != _renderSerial) {
         return;
       }
       setState(() {
         _scene = scene;
+        _reactifyCharacter = reactifyCharacter;
+        _reactifyResolvedPartCount = reactifyResolvedPartCount;
         _sceneLoading = false;
       });
       _game.updateScene(scene, next, widget.tables);
@@ -478,6 +513,8 @@ class _HeaderBar extends StatelessWidget {
     required this.cases,
     required this.changeCount,
     required this.resolvedPartCount,
+    required this.nativeSlotCount,
+    required this.nativePartCount,
     required this.onChanged,
   });
 
@@ -485,6 +522,8 @@ class _HeaderBar extends StatelessWidget {
   final List<ValidationCaseDescriptor> cases;
   final int changeCount;
   final int resolvedPartCount;
+  final int nativeSlotCount;
+  final int nativePartCount;
   final ValueChanged<String> onChanged;
 
   @override
@@ -557,13 +596,16 @@ class _HeaderBar extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Text(
-                    '$changeCount changed fields • $resolvedPartCount resolved parts',
-                    style: const TextStyle(
-                      color: Color(0xFF00F5FF),
-                      fontFamily: 'Outfit',
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12.5,
+                  Flexible(
+                    child: Text(
+                      '$changeCount fields • $resolvedPartCount legacy • $nativeSlotCount slots • $nativePartCount native',
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFF00F5FF),
+                        fontFamily: 'Outfit',
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12.5,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 20),

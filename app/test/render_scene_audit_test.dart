@@ -336,7 +336,10 @@ Future<_SceneAudit> _auditForFixture({
   required CharacterRenderer renderer,
   required String fixtureAsset,
 }) async {
-  final state = await _stateForFixture(parser: parser, fixtureAsset: fixtureAsset);
+  final state = await _stateForFixture(
+    parser: parser,
+    fixtureAsset: fixtureAsset,
+  );
   final scene = await renderer.buildScene(state);
   return _SceneAudit.fromScene(scene, state, renderer.tables);
 }
@@ -403,7 +406,11 @@ class _SceneAudit {
   final ResolvedScene scene;
   final Map<String, _FamilyAudit> families;
 
-  factory _SceneAudit.fromScene(ResolvedScene scene, GachaCharacterState state, ResolverTables tables) {
+  factory _SceneAudit.fromScene(
+    ResolvedScene scene,
+    GachaCharacterState state,
+    ResolverTables tables,
+  ) {
     final groups = <String, List<_IndexedPart>>{};
     for (var index = 0; index < scene.parts.length; index++) {
       final part = scene.parts[index];
@@ -411,9 +418,11 @@ class _SceneAudit {
       if (asset == null) {
         continue;
       }
-      final bounds = resolveTestWorldTransform(part, state, tables).transformRect(
-        Rect.fromLTWH(0, 0, asset.size.width, asset.size.height),
-      );
+      final bounds = resolveTestWorldTransform(
+        part,
+        state,
+        tables,
+      ).transformRect(Rect.fromLTWH(0, 0, asset.size.width, asset.size.height));
       groups
           .putIfAbsent(part.catalogPart.family, () => [])
           .add(_IndexedPart(index: index, part: part, bounds: bounds));

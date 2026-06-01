@@ -220,8 +220,6 @@ AffineMatrix _expectedlocalTransform({
       .multiply(catalog.localMatrix);
 }
 
-
-
 AffineMatrix _groupAdjustmentFor(
   ResolverTables tables,
   RenderCatalogPart part,

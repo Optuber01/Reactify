@@ -166,7 +166,12 @@ void main() {
       10.0,
       'ponytail head centerDx',
     );
-    _expectClose(relativeToHead.centerDy, 27.89, 10.0, 'ponytail head centerDy');
+    _expectClose(
+      relativeToHead.centerDy,
+      27.89,
+      10.0,
+      'ponytail head centerDy',
+    );
     _expectClose(
       relativeToHead.widthRatio,
       0.74,
@@ -319,7 +324,12 @@ void main() {
       familyBounds['hand_back_base']!,
     );
 
-    _expectClose(weaponFront.centerDx, 19.49, 10.0, 'weapon_front hand centerDx');
+    _expectClose(
+      weaponFront.centerDx,
+      19.49,
+      10.0,
+      'weapon_front hand centerDx',
+    );
     _expectClose(
       weaponFront.centerDy,
       98.23,

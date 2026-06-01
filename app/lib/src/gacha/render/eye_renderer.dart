@@ -189,17 +189,23 @@ class EyeRenderer {
   static final Map<String, List<int>> _framesCache = {};
 
   List<String> _pathTokens(String raw) {
-    return _tokensCache.putIfAbsent(raw, () => [
-      for (final token in raw.split('/'))
-        if (token.isNotEmpty && token != '<anon>') token,
-    ]);
+    return _tokensCache.putIfAbsent(
+      raw,
+      () => [
+        for (final token in raw.split('/'))
+          if (token.isNotEmpty && token != '<anon>') token,
+      ],
+    );
   }
 
   List<int> _framePath(String raw) {
-    return _framesCache.putIfAbsent(raw, () => [
-      for (final segment in raw.split('/'))
-        if (segment.isNotEmpty) int.tryParse(segment) ?? 0,
-    ]);
+    return _framesCache.putIfAbsent(
+      raw,
+      () => [
+        for (final segment in raw.split('/'))
+          if (segment.isNotEmpty) int.tryParse(segment) ?? 0,
+      ],
+    );
   }
 
   int _frameFromToken(String token, GachaCharacterState state) {

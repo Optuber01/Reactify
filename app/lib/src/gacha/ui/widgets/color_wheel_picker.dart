@@ -67,7 +67,10 @@ class ColorWheelPicker extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: currentColor,
                           shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white.withValues(alpha: 0.35), width: 1.5),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.35),
+                            width: 1.5,
+                          ),
                           boxShadow: [
                             BoxShadow(
                               color: currentColor.withValues(alpha: 0.4),
@@ -115,8 +118,14 @@ class ColorWheelPicker extends StatelessWidget {
                       itemCount: 8,
                       itemBuilder: (context, index) {
                         final double hue = (index * 45.0) % 360.0;
-                        final color = HSLColor.fromAHSL(1.0, hue, 0.8, 0.55).toColor();
-                        final isSelected = currentColor.toARGB32() == color.toARGB32();
+                        final color = HSLColor.fromAHSL(
+                          1.0,
+                          hue,
+                          0.8,
+                          0.55,
+                        ).toColor();
+                        final isSelected =
+                            currentColor.toARGB32() == color.toARGB32();
 
                         return _CuratedColorItem(
                           color: color,
@@ -173,7 +182,9 @@ class _CuratedColorItemState extends State<_CuratedColorItem> {
             color: widget.color,
             shape: BoxShape.circle,
             border: Border.all(
-              color: widget.isSelected ? Colors.white : Colors.white.withValues(alpha: 0.1),
+              color: widget.isSelected
+                  ? Colors.white
+                  : Colors.white.withValues(alpha: 0.1),
               width: widget.isSelected ? 2.5 : 1.5,
             ),
             boxShadow: [
@@ -230,5 +241,6 @@ class _GlassBorderPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _GlassBorderPainter oldDelegate) =>
-      oldDelegate.borderRadius != borderRadius || oldDelegate.strokeWidth != strokeWidth;
+      oldDelegate.borderRadius != borderRadius ||
+      oldDelegate.strokeWidth != strokeWidth;
 }

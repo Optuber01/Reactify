@@ -1,6 +1,7 @@
 import '../../gacha/code/gacha_character_state.dart';
 import '../../gacha/render/character_renderer.dart';
 import '../../gacha/render/render_part.dart';
+import '../../gacha/render/transform_graph.dart';
 import '../model/reactify_document.dart';
 
 class GachaToReactifyAdapter {
@@ -10,6 +11,7 @@ class GachaToReactifyAdapter {
 
   ReactifyCharacterDocument migrate(GachaCharacterState state, {String? id}) {
     final parts = renderer.resolveParts(state);
+    final leafSlots = [for (final part in parts) _slotForPart(state, part)];
     return ReactifyCharacterDocument(
       id: id ?? _stableCharacterId(state),
       name: state.metadata('namex', fallback: 'Imported Gacha Character'),
@@ -20,13 +22,14 @@ class GachaToReactifyAdapter {
         'pose': state.numeric('pose'),
         'headlayer': state.numeric('headlayer'),
       },
-      slots: [
-        for (final part in parts) _slotForPart(state, part),
-      ],
+      slots: [..._semanticSlotsFor(leafSlots), ...leafSlots],
     );
   }
 
-  ReactifySlot _slotForPart(GachaCharacterState state, ResolvedRenderPart part) {
+  ReactifySlot _slotForPart(
+    GachaCharacterState state,
+    ResolvedRenderPart part,
+  ) {
     final catalog = part.catalogPart;
     final tint = part.tintColor;
     final tintChannels = tint == null || catalog.tintChannel == 'none'
@@ -35,6 +38,7 @@ class GachaToReactifyAdapter {
     return ReactifySlot(
       id: _slotId(part),
       family: _nativeFamilyFor(catalog.family),
+      kind: ReactifySlotKind.renderLeaf,
       name: catalog.partRole.isEmpty ? catalog.family : catalog.partRole,
       anchorId: part.targetJoint,
       localTransform: part.localTransform,
@@ -52,16 +56,111 @@ class GachaToReactifyAdapter {
         'legacyFamily': catalog.family,
         'legacyChooserFrame': catalog.chooserFrame,
         'legacyPartRole': catalog.partRole,
+        'legacyOrderedPartIndex': catalog.orderedPartIndex,
         'legacyLeafId': catalog.leafId,
+        'legacyOriginalAssetPath': catalog.originalAssetPath,
         'legacyTintChannel': catalog.tintChannel,
         'legacyVisibilityRule': catalog.visibilityRule,
         'legacyHostScope': catalog.hostScope,
         'legacyHostName': catalog.hostName,
+        'legacyHostChildName': catalog.hostChildName,
+        'legacyHostDepthPath': catalog.hostDepthPath,
         'legacyNamePath': catalog.namePath,
+        'legacyCharacterPath': catalog.characterPath,
+        'legacyDepthPath': catalog.depthPath,
         'legacyFramePath': catalog.framePath,
+        'legacyRuntimeAnchorX': catalog.runtimeAnchorX,
+        'legacyRuntimeAnchorY': catalog.runtimeAnchorY,
+        'legacyDependencyField': catalog.dependencyField,
+        'legacyDependencyValue': catalog.dependencyValue,
+        'legacySizeTable': catalog.sizeTable,
+        'legacyRootSpriteId': catalog.rootSpriteId,
+        'legacyNotes': catalog.notes,
         'statePose': state.numeric('pose'),
       },
     );
+  }
+
+  List<ReactifySlot> _semanticSlotsFor(List<ReactifySlot> leafSlots) {
+    final groups = <String, List<ReactifySlot>>{};
+    for (final slot in leafSlots) {
+      final semanticId = _semanticSlotId(slot);
+      groups.putIfAbsent(semanticId, () => []).add(slot);
+    }
+    final slots = <ReactifySlot>[];
+    for (final entry in groups.entries) {
+      final children = entry.value
+        ..sort((left, right) {
+          final depthCompare = left.depth.compareTo(right.depth);
+          if (depthCompare != 0) return depthCompare;
+          return left.id.compareTo(right.id);
+        });
+      final first = children.first;
+      slots.add(
+        ReactifySlot(
+          id: entry.key,
+          family: first.family,
+          kind: ReactifySlotKind.semantic,
+          name: _semanticName(first),
+          anchorId: first.anchorId,
+          localTransform: const AffineMatrix.identity(),
+          depth: children.first.depth,
+          visible: children.any((slot) => slot.visible),
+          childSlotIds: [for (final child in children) child.id],
+          metadata: {
+            'source': 'gacha_semantic_slot',
+            'legacyFamilies': {
+              for (final child in children)
+                child.metadata['legacyFamily'] as String? ?? child.family,
+            }.toList()..sort(),
+          },
+        ),
+      );
+    }
+    slots.sort((left, right) {
+      final depthCompare = left.depth.compareTo(right.depth);
+      if (depthCompare != 0) return depthCompare;
+      return left.id.compareTo(right.id);
+    });
+    return slots;
+  }
+
+  static String _semanticSlotId(ReactifySlot slot) {
+    final legacyFamily =
+        slot.metadata['legacyFamily'] as String? ?? slot.family;
+    final hostName = slot.metadata['legacyHostName'] as String? ?? '';
+    if (legacyFamily == 'left_eye' || legacyFamily == 'right_eye') {
+      return 'slot.face.$legacyFamily';
+    }
+    if (legacyFamily == 'left_eyebrow' || legacyFamily == 'right_eyebrow') {
+      return 'slot.face.$legacyFamily';
+    }
+    if (legacyFamily.contains('hair')) {
+      return 'slot.hair.$legacyFamily';
+    }
+    if (legacyFamily == 'hat' ||
+        legacyFamily == 'glasses' ||
+        legacyFamily.contains('accessory') ||
+        legacyFamily.contains('other')) {
+      return 'slot.accessory.$legacyFamily.$hostName';
+    }
+    if (legacyFamily.contains('weapon') || legacyFamily == 'shield') {
+      return 'slot.prop.$legacyFamily.$hostName';
+    }
+    if (slot.family == 'clothing') {
+      return 'slot.clothing.$legacyFamily.$hostName';
+    }
+    return 'slot.${slot.family}.$legacyFamily.$hostName';
+  }
+
+  static String _semanticName(ReactifySlot slot) {
+    final legacyFamily =
+        slot.metadata['legacyFamily'] as String? ?? slot.family;
+    return legacyFamily
+        .split('_')
+        .where((segment) => segment.isNotEmpty)
+        .map((segment) => '${segment[0].toUpperCase()}${segment.substring(1)}')
+        .join(' ');
   }
 
   static String _slotId(ResolvedRenderPart part) {

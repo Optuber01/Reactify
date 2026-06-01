@@ -72,8 +72,7 @@ class HeadRenderer {
     parts.addAll(eyeRenderer.resolve(state, tables));
     return [
       for (final part in parts)
-        if (TintPipeline.evaluateVisibility(part.visibilityRule, state))
-          part,
+        if (TintPipeline.evaluateVisibility(part.visibilityRule, state)) part,
     ];
   }
 }

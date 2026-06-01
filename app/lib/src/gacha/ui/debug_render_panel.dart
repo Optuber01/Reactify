@@ -34,8 +34,8 @@ class DebugRenderPanel extends StatelessWidget {
     final expectedFamilies = expectedResolvedFamiliesForState(state).toList()
       ..sort();
     final missingFamilies = expectedFamilies
-      .where((family) => !familyCounts.containsKey(family))
-      .toList(growable: false);
+        .where((family) => !familyCounts.containsKey(family))
+        .toList(growable: false);
     final bounds = scene.worldBounds;
     final selectedDefinition = selectedField == null
         ? null
@@ -84,9 +84,9 @@ class DebugRenderPanel extends StatelessWidget {
                   Text(
                     'Debug / Renderer Feedback',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   _kv(context, 'Fixture / Code', fixtureLabel),
@@ -101,12 +101,16 @@ class DebugRenderPanel extends StatelessWidget {
                   _kv(
                     context,
                     'Visible families',
-                    visibleFamilies.isEmpty ? 'none' : visibleFamilies.join(', '),
+                    visibleFamilies.isEmpty
+                        ? 'none'
+                        : visibleFamilies.join(', '),
                   ),
                   _kv(
                     context,
                     'Missing / unresolved selected families',
-                    missingFamilies.isEmpty ? 'none' : missingFamilies.join(', '),
+                    missingFamilies.isEmpty
+                        ? 'none'
+                        : missingFamilies.join(', '),
                     valueColor: missingFamilies.isEmpty
                         ? null
                         : const Color(0xFFFF6B6B),
@@ -132,9 +136,9 @@ class DebugRenderPanel extends StatelessWidget {
                     const SizedBox(height: 12),
                     Text(
                       'Warnings',
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                            color: Colors.white,
-                          ),
+                      style: Theme.of(
+                        context,
+                      ).textTheme.titleSmall?.copyWith(color: Colors.white),
                     ),
                     const SizedBox(height: 6),
                     for (final warning in scene.warnings)
@@ -142,18 +146,17 @@ class DebugRenderPanel extends StatelessWidget {
                         padding: const EdgeInsets.only(bottom: 4),
                         child: Text(
                           warning,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: const Color(0xFFFF6B6B),
-                          ),
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: const Color(0xFFFF6B6B)),
                         ),
                       ),
                   ],
                   const SizedBox(height: 12),
                   Text(
                     'Per-family part count',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: Colors.white,
-                        ),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.titleSmall?.copyWith(color: Colors.white),
                   ),
                   const SizedBox(height: 6),
                   SelectableText(
@@ -174,9 +177,9 @@ class DebugRenderPanel extends StatelessWidget {
                   const SizedBox(height: 12),
                   Text(
                     'Changed fields',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: Colors.white,
-                        ),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.titleSmall?.copyWith(color: Colors.white),
                   ),
                   const SizedBox(height: 6),
                   SelectableText(
@@ -192,9 +195,9 @@ class DebugRenderPanel extends StatelessWidget {
                   const SizedBox(height: 12),
                   Text(
                     'Resolved parts',
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: Colors.white,
-                        ),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.titleSmall?.copyWith(color: Colors.white),
                   ),
                   const SizedBox(height: 6),
                   SelectableText(
@@ -226,7 +229,8 @@ class DebugRenderPanel extends StatelessWidget {
       padding: const EdgeInsets.only(bottom: 6),
       child: RichText(
         text: TextSpan(
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          style:
+              Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: Colors.white.withValues(alpha: 0.7),
               ) ??
               const TextStyle(color: Colors.white70),
@@ -318,5 +322,6 @@ class _GlassBorderPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _GlassBorderPainter oldDelegate) =>
-      oldDelegate.borderRadius != borderRadius || oldDelegate.strokeWidth != strokeWidth;
+      oldDelegate.borderRadius != borderRadius ||
+      oldDelegate.strokeWidth != strokeWidth;
 }

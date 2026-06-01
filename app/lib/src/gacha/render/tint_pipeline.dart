@@ -7,7 +7,9 @@ class _VisibilityClause {
     if (clause == 'pose wrapper is visible') {
       isPoseWrapper = true;
     } else {
-      final match = RegExp(r'^([A-Za-z0-9_]+)\s*([!=]=)\s*(-?\d+)$').firstMatch(clause);
+      final match = RegExp(
+        r'^([A-Za-z0-9_]+)\s*([!=]=)\s*(-?\d+)$',
+      ).firstMatch(clause);
       if (match != null) {
         field = match.group(1)!;
         isEquals = match.group(2) == '==';

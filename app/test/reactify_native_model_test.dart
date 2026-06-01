@@ -165,6 +165,10 @@ void main() {
       final bridgeParts = ReactifyRenderBridge(
         assetStore: GachaAssetStore(),
       ).resolveSceneParts(scene, {character.id: character});
+      final shiftedPart = bridgeParts.first;
+      final baseMatch = baseParts.firstWhere(
+        (part) => part.catalogPart.leafId == shiftedPart.catalogPart.leafId,
+      );
 
       expect(baseParts, isNotEmpty);
       expect(
@@ -173,9 +177,73 @@ void main() {
             .toList(),
         isEmpty,
       );
-      expect(bridgeParts.first.localTransform.tx, isNotNull);
+      expect(shiftedPart.sceneTransform.tx, 20);
+      expect(shiftedPart.sceneTransform.ty, 30);
+      expect(
+        shiftedPart.localTransform.toDebugJson(),
+        baseMatch.localTransform.toDebugJson(),
+      );
     },
   );
+
+  test('render bridge bounds include scene and rig transforms', () async {
+    const character = ReactifyCharacterDocument(
+      id: 'char.bounds',
+      name: 'Bounds',
+      rig: ReactifyRigTemplate(
+        id: 'test_rig',
+        name: 'Test Rig',
+        anchors: {
+          'torso': ReactifyAnchor(
+            id: 'torso',
+            localTransform: AffineMatrix(
+              a: 1,
+              b: 0,
+              c: 0,
+              d: 1,
+              tx: 40,
+              ty: 50,
+            ),
+          ),
+        },
+      ),
+      slots: [
+        ReactifySlot(
+          id: 'slot.bounds',
+          kind: ReactifySlotKind.custom,
+          family: 'test',
+          name: 'Bounds Slot',
+          anchorId: 'torso',
+          localTransform: AffineMatrix(a: 1, b: 0, c: 0, d: 1, tx: 10, ty: 15),
+          depth: 1,
+          visible: true,
+          asset: ReactifyAssetRef(
+            id: 'asset.bounds',
+            kind: ReactifyAssetKind.svg,
+            uri: 'assets/gacha/body/10803.svg',
+          ),
+        ),
+      ],
+    );
+    const scene = ReactifySceneDocument(
+      id: 'scene.bounds',
+      name: 'Bounds',
+      characters: [
+        ReactifySceneCharacter(
+          id: 'scene_char.bounds',
+          characterId: 'char.bounds',
+          transform: AffineMatrix(a: 1, b: 0, c: 0, d: 1, tx: 20, ty: 30),
+        ),
+      ],
+    );
+
+    final resolved = await ReactifyRenderBridge(
+      assetStore: GachaAssetStore(),
+    ).buildScene(scene, {character.id: character});
+
+    expect(resolved.worldBounds.left, 70);
+    expect(resolved.worldBounds.top, 95);
+  });
 
   test('exports editable SVG scene groups for characters and slots', () async {
     final code = await rootBundle.loadString('fixtures/default_boy.gc.txt');
@@ -218,4 +286,41 @@ void main() {
       isTrue,
     );
   });
+
+  test(
+    'svg export applies semantic slot overrides to child render leaves',
+    () async {
+      final code = await rootBundle.loadString('fixtures/default_boy.gc.txt');
+      final character = adapter.migrate(
+        parser.parse(code),
+        id: 'char.default_boy',
+      );
+      final hairSlot = character.semanticSlots.firstWhere(
+        (slot) => slot.family == 'hair',
+      );
+      final scene = ReactifySceneDocument(
+        id: 'scene.svg.override',
+        name: 'SVG Override',
+        characters: [
+          ReactifySceneCharacter(
+            id: 'scene_char.host',
+            characterId: 'char.default_boy',
+            transform: const AffineMatrix.identity(),
+            slotOverrides: {
+              hairSlot.id: const ReactifySlotOverride(visible: false),
+            },
+          ),
+        ],
+      );
+
+      final package = await ReactifySvgExporter().exportPackage(scene, {
+        character.id: character,
+      });
+
+      expect(package.svg, isNot(contains(hairSlot.id)));
+      for (final childId in hairSlot.childSlotIds) {
+        expect(package.svg, isNot(contains(childId)));
+      }
+    },
+  );
 }

@@ -195,7 +195,9 @@ class GachaGameCanvas extends FlameGame {
 
       final asset = scene.assets[part.catalogPart.appAssetPath];
       final parentMatrix = jointWorld[part.targetJoint] ?? jointWorld['torso']!;
-      final localMatrix = parentMatrix.multiply(part.localTransform);
+      final localMatrix = part.sceneTransform
+          .multiply(parentMatrix)
+          .multiply(part.localTransform);
 
       if (_componentsByKey.containsKey(key)) {
         final comp = _componentsByKey[key]!;

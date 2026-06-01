@@ -25,7 +25,7 @@ class ReactifyRenderBridge {
     return ResolvedScene(
       parts: parts,
       assets: assets,
-      worldBounds: _worldBounds(parts, assets),
+      worldBounds: _worldBounds(scene, characters, assets),
       warnings: const [],
     );
   }
@@ -98,7 +98,8 @@ class ReactifyRenderBridge {
     final asset = slot.asset!;
     return ResolvedRenderPart(
       catalogPart: _catalogPartFor(slot, asset),
-      localTransform: sceneTransform.multiply(slot.localTransform),
+      localTransform: slot.localTransform,
+      sceneTransform: sceneTransform,
       targetJoint: slot.anchorId,
       tintColor: slot.tintChannels.isEmpty
           ? null
@@ -150,23 +151,63 @@ class ReactifyRenderBridge {
   }
 
   Rect _worldBounds(
-    List<ResolvedRenderPart> parts,
+    ReactifySceneDocument scene,
+    Map<String, ReactifyCharacterDocument> characters,
     Map<String, PreparedAsset> assets,
   ) {
     var bounds = Rect.zero;
     var hasBounds = false;
-    for (final part in parts) {
-      final asset = assets[part.catalogPart.appAssetPath];
-      if (asset == null) {
+    for (final sceneCharacter in scene.characters) {
+      final character = characters[sceneCharacter.characterId];
+      if (character == null) {
         continue;
       }
-      final partBounds = part.localTransform.transformRect(
-        Rect.fromLTWH(0, 0, asset.size.width, asset.size.height),
-      );
-      bounds = hasBounds ? bounds.expandToInclude(partBounds) : partBounds;
-      hasBounds = true;
+      final anchorWorld = _anchorWorldTransforms(character.rig);
+      for (final part in resolveCharacterParts(character, sceneCharacter)) {
+        final asset = assets[part.catalogPart.appAssetPath];
+        if (asset == null) {
+          continue;
+        }
+        final parentWorld =
+            anchorWorld[part.targetJoint] ??
+            anchorWorld['torso'] ??
+            const AffineMatrix.identity();
+        final worldMatrix = part.sceneTransform
+            .multiply(parentWorld)
+            .multiply(part.localTransform);
+        final partBounds = worldMatrix.transformRect(
+          Rect.fromLTWH(0, 0, asset.size.width, asset.size.height),
+        );
+        bounds = hasBounds ? bounds.expandToInclude(partBounds) : partBounds;
+        hasBounds = true;
+      }
     }
     return bounds;
+  }
+
+  Map<String, AffineMatrix> _anchorWorldTransforms(ReactifyRigTemplate rig) {
+    final resolved = <String, AffineMatrix>{};
+    AffineMatrix resolve(String id) {
+      final existing = resolved[id];
+      if (existing != null) {
+        return existing;
+      }
+      final anchor = rig.anchors[id];
+      if (anchor == null) {
+        return const AffineMatrix.identity();
+      }
+      final parentId = anchor.parentId;
+      final matrix = parentId == null
+          ? anchor.localTransform
+          : resolve(parentId).multiply(anchor.localTransform);
+      resolved[id] = matrix;
+      return matrix;
+    }
+
+    for (final id in rig.anchors.keys) {
+      resolve(id);
+    }
+    return resolved;
   }
 }
 

@@ -161,15 +161,12 @@ class ReactifySvgExporter {
       'data-pose="${_xml(sceneCharacter.pose ?? '')}" '
       'transform="${_matrix(sceneCharacter.transform)}">',
     );
-    final slots =
-        [
-          for (final slot in character.slots)
-            sceneCharacter.slotOverrides[slot.id]?.applyTo(slot) ?? slot,
-        ]..sort((left, right) {
-          final depthCompare = left.depth.compareTo(right.depth);
-          if (depthCompare != 0) return depthCompare;
-          return left.id.compareTo(right.id);
-        });
+    final slots = _effectiveSlots(character, sceneCharacter).toList()
+      ..sort((left, right) {
+        final depthCompare = left.depth.compareTo(right.depth);
+        if (depthCompare != 0) return depthCompare;
+        return left.id.compareTo(right.id);
+      });
     for (final slot in slots) {
       if (!slot.visible) {
         continue;
@@ -268,15 +265,45 @@ class ReactifySvgExporter {
       if (character == null) {
         continue;
       }
-      for (final slot in character.slots) {
-        final overridden = sceneCharacter.slotOverrides[slot.id]?.applyTo(slot);
-        final asset = (overridden ?? slot).asset;
+      for (final slot in _effectiveSlots(character, sceneCharacter)) {
+        if (!slot.visible) {
+          continue;
+        }
+        final asset = slot.asset;
         if (asset != null) {
           assets[asset.id] = asset;
         }
       }
     }
     return assets;
+  }
+
+  Iterable<ReactifySlot> _effectiveSlots(
+    ReactifyCharacterDocument character,
+    ReactifySceneCharacter sceneCharacter,
+  ) sync* {
+    final slotsById = {for (final slot in character.slots) slot.id: slot};
+    final semanticOverrides = <String, ReactifySlotOverride>{};
+    for (final entry in sceneCharacter.slotOverrides.entries) {
+      final slot = slotsById[entry.key];
+      if (slot?.kind == ReactifySlotKind.semantic) {
+        for (final childId in slot!.childSlotIds) {
+          semanticOverrides[childId] = entry.value;
+        }
+      }
+    }
+    for (final baseSlot in character.slots) {
+      var slot = baseSlot;
+      final semanticOverride = semanticOverrides[baseSlot.id];
+      final directOverride = sceneCharacter.slotOverrides[baseSlot.id];
+      if (semanticOverride != null) {
+        slot = semanticOverride.applyTo(slot);
+      }
+      if (directOverride != null) {
+        slot = directOverride.applyTo(slot);
+      }
+      yield slot;
+    }
   }
 
   static String _metadataAttributes(Map<String, Object?> metadata) {

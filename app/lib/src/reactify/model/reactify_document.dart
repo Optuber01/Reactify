@@ -4,6 +4,7 @@ import '../../gacha/render/transform_graph.dart';
 
 const int reactifyCharacterDocumentVersion = 1;
 const int reactifySceneDocumentVersion = 1;
+const int reactifyProjectDocumentVersion = 1;
 
 enum ReactifyAssetKind { svg, png, vector, raster, drawing, unknown }
 
@@ -16,6 +17,8 @@ class ReactifyAssetRef {
     required this.uri,
     this.source = 'reactify',
     this.preserveVector = true,
+    this.dimensions,
+    this.metadata = const {},
   });
 
   final String id;
@@ -23,6 +26,8 @@ class ReactifyAssetRef {
   final String uri;
   final String source;
   final bool preserveVector;
+  final Size? dimensions;
+  final Map<String, Object?> metadata;
 
   factory ReactifyAssetRef.fromJson(Map<String, Object?> json) {
     return ReactifyAssetRef(
@@ -31,6 +36,8 @@ class ReactifyAssetRef {
       uri: _string(json, 'uri'),
       source: _string(json, 'source', fallback: 'reactify'),
       preserveVector: _bool(json, 'preserveVector', fallback: true),
+      dimensions: _sizeOrNull(json['dimensions']),
+      metadata: _metadata(json['metadata']),
     );
   }
 
@@ -41,6 +48,68 @@ class ReactifyAssetRef {
       'uri': uri,
       'source': source,
       'preserveVector': preserveVector,
+      'dimensions': dimensions == null
+          ? null
+          : {'width': dimensions!.width, 'height': dimensions!.height},
+      'metadata': metadata,
+    };
+  }
+}
+
+class ReactifyRegisteredAsset {
+  const ReactifyRegisteredAsset({
+    required this.id,
+    required this.kind,
+    required this.uri,
+    this.source = 'user',
+    this.preserveVector = true,
+    this.dimensions,
+    this.metadata = const {},
+  });
+
+  final String id;
+  final ReactifyAssetKind kind;
+  final String uri;
+  final String source;
+  final bool preserveVector;
+  final Size? dimensions;
+  final Map<String, Object?> metadata;
+
+  factory ReactifyRegisteredAsset.fromJson(Map<String, Object?> json) {
+    return ReactifyRegisteredAsset(
+      id: _string(json, 'id'),
+      kind: _enumByName(ReactifyAssetKind.values, _string(json, 'kind')),
+      uri: _string(json, 'uri'),
+      source: _string(json, 'source', fallback: 'user'),
+      preserveVector: _bool(json, 'preserveVector', fallback: true),
+      dimensions: _sizeOrNull(json['dimensions']),
+      metadata: _metadata(json['metadata']),
+    );
+  }
+
+  ReactifyAssetRef toRef() {
+    return ReactifyAssetRef(
+      id: id,
+      kind: kind,
+      uri: uri,
+      source: source,
+      preserveVector: preserveVector,
+      dimensions: dimensions,
+      metadata: metadata,
+    );
+  }
+
+  Map<String, Object?> toJson() {
+    return {
+      'id': id,
+      'kind': kind.name,
+      'uri': uri,
+      'source': source,
+      'preserveVector': preserveVector,
+      'dimensions': dimensions == null
+          ? null
+          : {'width': dimensions!.width, 'height': dimensions!.height},
+      'metadata': metadata,
     };
   }
 }
@@ -674,11 +743,13 @@ class ReactifySceneEditingState {
     required this.scene,
     required this.characters,
     required this.selectedSceneCharacterId,
+    this.assetRegistry = const {},
   });
 
   final ReactifySceneDocument scene;
   final Map<String, ReactifyCharacterDocument> characters;
   final String selectedSceneCharacterId;
+  final Map<String, ReactifyRegisteredAsset> assetRegistry;
 
   ReactifySceneCharacter? get selectedSceneCharacter {
     for (final character in scene.characters) {
@@ -695,11 +766,24 @@ class ReactifySceneEditingState {
   }
 
   factory ReactifySceneEditingState.fromJson(Map<String, Object?> json) {
+    final version = _int(
+      json,
+      'schemaVersion',
+      fallback: reactifyProjectDocumentVersion,
+    );
+    if (version > reactifyProjectDocumentVersion) {
+      throw StateError('Unsupported Reactify project schema $version.');
+    }
     final scene = ReactifySceneDocument.fromJson(_asMap(json['scene']));
     final parsedCharacters = <String, ReactifyCharacterDocument>{};
     for (final entry in _list(json, 'characters')) {
       final character = ReactifyCharacterDocument.fromJson(_asMap(entry));
       parsedCharacters[character.id] = character;
+    }
+    final parsedAssetRegistry = <String, ReactifyRegisteredAsset>{};
+    for (final entry in _list(json, 'assetRegistry')) {
+      final asset = ReactifyRegisteredAsset.fromJson(_asMap(entry));
+      parsedAssetRegistry[asset.id] = asset;
     }
     final selectedId = _string(
       json,
@@ -709,6 +793,7 @@ class ReactifySceneEditingState {
     return ReactifySceneEditingState(
       scene: scene,
       characters: parsedCharacters,
+      assetRegistry: parsedAssetRegistry,
       selectedSceneCharacterId:
           scene.characters.any((character) => character.id == selectedId)
           ? selectedId
@@ -720,6 +805,7 @@ class ReactifySceneEditingState {
     ReactifySceneDocument? scene,
     Map<String, ReactifyCharacterDocument>? characters,
     String? selectedSceneCharacterId,
+    Map<String, ReactifyRegisteredAsset>? assetRegistry,
   }) {
     final nextScene = scene ?? this.scene;
     final requestedSelection =
@@ -733,12 +819,51 @@ class ReactifySceneEditingState {
     return ReactifySceneEditingState(
       scene: nextScene,
       characters: characters ?? this.characters,
+      assetRegistry: assetRegistry ?? this.assetRegistry,
       selectedSceneCharacterId: nextSelection,
     );
   }
 
+  ReactifySceneEditingState registerAsset(ReactifyRegisteredAsset asset) {
+    return copyWith(assetRegistry: {...assetRegistry, asset.id: asset});
+  }
+
   ReactifySceneEditingState selectSceneCharacter(String sceneCharacterId) {
     return copyWith(selectedSceneCharacterId: sceneCharacterId);
+  }
+
+  ReactifySceneEditingState addSceneCharacter({
+    required ReactifySceneCharacter sceneCharacter,
+    ReactifyCharacterDocument? character,
+    bool select = true,
+  }) {
+    final nextCharacters = {...characters};
+    if (character != null) {
+      nextCharacters[character.id] = character;
+    }
+    return copyWith(
+      scene: scene.addCharacter(sceneCharacter),
+      characters: nextCharacters,
+      selectedSceneCharacterId: select
+          ? sceneCharacter.id
+          : selectedSceneCharacterId,
+    );
+  }
+
+  ReactifySceneEditingState removeSceneCharacter(String sceneCharacterId) {
+    final nextSceneCharacters = [
+      for (final character in scene.characters)
+        if (character.id != sceneCharacterId) character,
+    ];
+    if (nextSceneCharacters.length == scene.characters.length) {
+      return this;
+    }
+    return copyWith(
+      scene: scene.copyWith(characters: nextSceneCharacters),
+      selectedSceneCharacterId: selectedSceneCharacterId == sceneCharacterId
+          ? (nextSceneCharacters.isEmpty ? '' : nextSceneCharacters.first.id)
+          : selectedSceneCharacterId,
+    );
   }
 
   ReactifySceneEditingState updateSelectedCharacterTransform(
@@ -799,6 +924,35 @@ class ReactifySceneEditingState {
     return copyWith(characters: nextCharacters);
   }
 
+  ReactifySceneEditingState attachRegisteredAssetSlotToSelectedCharacter({
+    required String assetId,
+    String family = 'custom',
+    String anchorId = 'head',
+    String name = 'Custom Asset',
+    AffineMatrix localTransform = const AffineMatrix.identity(),
+    int? depth,
+  }) {
+    final asset = assetRegistry[assetId];
+    final character = selectedCharacterDocument;
+    if (asset == null || character == null || selectedSceneCharacter == null) {
+      return this;
+    }
+    return addCustomSlotToSelectedCharacter(
+      ReactifySlot(
+        id: _nextCustomSlotId(character, 'custom.asset.${asset.id}'),
+        kind: ReactifySlotKind.custom,
+        family: family,
+        name: name,
+        anchorId: anchorId,
+        localTransform: localTransform,
+        depth: depth ?? _nextCustomDepth(character),
+        visible: true,
+        asset: asset.toRef(),
+        metadata: {'source': 'registered_asset', 'assetId': asset.id},
+      ),
+    );
+  }
+
   ReactifySceneEditingState _replaceSelectedSceneCharacter(
     ReactifySceneCharacter Function(ReactifySceneCharacter character) replace,
   ) {
@@ -821,15 +975,40 @@ class ReactifySceneEditingState {
   Map<String, Object?> toJson() {
     final sortedCharacters = characters.values.toList()
       ..sort((left, right) => left.id.compareTo(right.id));
+    final sortedAssets = assetRegistry.values.toList()
+      ..sort((left, right) => left.id.compareTo(right.id));
     return {
-      'schemaVersion': reactifySceneDocumentVersion,
+      'schemaVersion': reactifyProjectDocumentVersion,
       'selectedSceneCharacterId': selectedSceneCharacterId,
       'scene': scene.toJson(),
       'characters': [
         for (final character in sortedCharacters) character.toJson(),
       ],
+      'assetRegistry': [for (final asset in sortedAssets) asset.toJson()],
     };
   }
+}
+
+String _nextCustomSlotId(ReactifyCharacterDocument character, String baseId) {
+  final existingIds = {for (final slot in character.slots) slot.id};
+  if (!existingIds.contains(baseId)) {
+    return baseId;
+  }
+  var index = 2;
+  while (existingIds.contains('$baseId.$index')) {
+    index += 1;
+  }
+  return '$baseId.$index';
+}
+
+int _nextCustomDepth(ReactifyCharacterDocument character) {
+  var maxDepth = 900000000;
+  for (final slot in character.slots) {
+    if (slot.kind == ReactifySlotKind.custom && slot.depth >= maxDepth) {
+      maxDepth = slot.depth + 1;
+    }
+  }
+  return maxDepth;
 }
 
 String _hexColor(Color color) {
@@ -866,6 +1045,17 @@ AffineMatrix _matrix(Object? value) {
     d: _double(json, 'd', fallback: 1),
     tx: _double(json, 'tx'),
     ty: _double(json, 'ty'),
+  );
+}
+
+Size? _sizeOrNull(Object? value) {
+  if (value == null) {
+    return null;
+  }
+  final json = _asMap(value);
+  return Size(
+    _double(json, 'width', fallback: 0),
+    _double(json, 'height', fallback: 0),
   );
 }
 

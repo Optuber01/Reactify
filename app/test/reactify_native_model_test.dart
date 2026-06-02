@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:reactify_gacha/src/gacha/code/gacha_code_parser.dart';
 import 'package:reactify_gacha/src/gacha/data/resolver_tables.dart';
 import 'package:reactify_gacha/src/gacha/render/character_renderer.dart';
+import 'package:reactify_gacha/src/gacha/render/render_part.dart';
 import 'package:reactify_gacha/src/gacha/render/transform_graph.dart';
 import 'package:reactify_gacha/src/reactify/export/reactify_svg_exporter.dart';
 import 'package:reactify_gacha/src/reactify/legacy/gacha_to_reactify_adapter.dart';
@@ -579,6 +580,149 @@ void main() {
   );
 
   test(
+    'scene editor project JSON preserves registry assets and attached slots',
+    () async {
+      final baseCharacter = _editableTestCharacter('char.registry');
+      const registeredSvg = ReactifyRegisteredAsset(
+        id: 'user.asset.spark.svg',
+        kind: ReactifyAssetKind.svg,
+        uri: 'user-assets/spark.svg',
+        source: 'user',
+        dimensions: Size(32, 24),
+        metadata: {'label': 'Spark SVG', 'importedAt': '2026-06-02'},
+      );
+      const registeredPng = ReactifyRegisteredAsset(
+        id: 'user.asset.badge.png',
+        kind: ReactifyAssetKind.png,
+        uri: 'user-assets/badge.png',
+        source: 'user',
+        dimensions: Size(64, 48),
+        metadata: {'label': 'Badge PNG'},
+      );
+      const drawing = ReactifySlot(
+        id: 'custom.drawing.registry',
+        kind: ReactifySlotKind.custom,
+        family: 'custom',
+        name: 'Registry Drawing',
+        anchorId: 'head',
+        localTransform: AffineMatrix(a: 1, b: 0, c: 0, d: 1, tx: 3, ty: 4),
+        depth: 10,
+        visible: true,
+        asset: ReactifyAssetRef(
+          id: 'custom.drawing.registry.asset',
+          kind: ReactifyAssetKind.drawing,
+          uri: 'reactify://drawing/custom.drawing.registry',
+          source: 'user',
+          dimensions: Size(12, 16),
+          metadata: {'source': 'user_drawing'},
+        ),
+        metadata: {
+          'source': 'user_drawing',
+          'drawingColor': '#44AAFF',
+          'drawingStrokeWidth': 5.0,
+          'drawingStrokes': [
+            [
+              {'x': 1.0, 'y': 2.0},
+              {'x': 10.0, 'y': 14.0},
+            ],
+          ],
+        },
+      );
+      const drawingAsset = ReactifyRegisteredAsset(
+        id: 'custom.drawing.registry.asset',
+        kind: ReactifyAssetKind.drawing,
+        uri: 'reactify://drawing/custom.drawing.registry',
+        source: 'user',
+        dimensions: Size(12, 16),
+        metadata: {
+          'source': 'user_drawing',
+          'slotId': 'custom.drawing.registry',
+        },
+      );
+      final editor = ReactifySceneEditingState(
+        selectedSceneCharacterId: 'scene_char.registry',
+        assetRegistry: const {
+          'user.asset.spark.svg': registeredSvg,
+          'user.asset.badge.png': registeredPng,
+        },
+        characters: {baseCharacter.id: baseCharacter},
+        scene: const ReactifySceneDocument(
+          id: 'scene.registry',
+          name: 'Registry Scene',
+          canvasSize: Size(320, 240),
+          cameraTransform: AffineMatrix(a: 1, b: 0, c: 0, d: 1, tx: 8, ty: 9),
+          characters: [
+            ReactifySceneCharacter(
+              id: 'scene_char.registry',
+              characterId: 'char.registry',
+              transform: AffineMatrix(
+                a: 0.75,
+                b: 0,
+                c: 0,
+                d: 0.75,
+                tx: 18,
+                ty: 22,
+              ),
+            ),
+          ],
+        ),
+      );
+
+      final edited = editor
+          .registerAsset(drawingAsset)
+          .addCustomSlotToSelectedCharacter(drawing)
+          .attachRegisteredAssetSlotToSelectedCharacter(
+            assetId: registeredSvg.id,
+            name: 'Spark SVG',
+            localTransform: const AffineMatrix(
+              a: 0.5,
+              b: 0,
+              c: 0,
+              d: 0.5,
+              tx: 6,
+              ty: 7,
+            ),
+          )
+          .toggleSelectedSemanticSlotOverride(family: 'hair', hidden: true);
+      final reparsed = ReactifySceneEditingState.fromJson(
+        Map<String, Object?>.from(jsonDecode(jsonEncode(edited.toJson()))),
+      );
+      final character = reparsed.characters['char.registry']!;
+      final attached = character.slots.firstWhere(
+        (slot) => slot.asset?.id == registeredSvg.id,
+      );
+      final drawingSlot = character.slots.firstWhere(
+        (slot) => slot.id == drawing.id,
+      );
+      final sceneCharacter = reparsed.scene.characters.single;
+
+      expect(reparsed.toJson(), edited.toJson());
+      expect(reparsed.assetRegistry.keys, {
+        registeredSvg.id,
+        registeredPng.id,
+        drawingAsset.id,
+      });
+      expect(reparsed.assetRegistry[registeredSvg.id]!.dimensions!.width, 32);
+      expect(
+        reparsed.assetRegistry[registeredPng.id]!.kind,
+        ReactifyAssetKind.png,
+      );
+      expect(reparsed.selectedSceneCharacterId, 'scene_char.registry');
+      expect(reparsed.scene.cameraTransform.tx, 8);
+      expect(sceneCharacter.transform.a, 0.75);
+      expect(sceneCharacter.slotOverrides['semantic.hair']?.visible, isFalse);
+      expect(attached.kind, ReactifySlotKind.custom);
+      expect(attached.metadata['assetId'], registeredSvg.id);
+      expect(attached.asset!.dimensions!.height, 24);
+      expect(drawingSlot.asset!.dimensions!.width, 12);
+      expect(
+        drawingSlot.metadata['drawingStrokes'],
+        drawing.metadata['drawingStrokes'],
+      );
+    },
+  );
+
+  test(
     'native preview svg and png exports share scene transform semantics',
     () async {
       final character = _transformEquivalenceCharacter();
@@ -718,6 +862,86 @@ void main() {
     expect(svgPackage.assets.single.inlined, isTrue);
     expect(pngBytes.take(8).toList(), [137, 80, 78, 71, 13, 10, 26, 10]);
   });
+
+  test(
+    'repeated native rebuild and export reuse shared custom asset paths',
+    () async {
+      var character = _editableTestCharacter('char.perf');
+      const sharedAsset = ReactifyAssetRef(
+        id: 'user.asset.shared.svg',
+        kind: ReactifyAssetKind.svg,
+        uri: 'assets/gacha/head/head_1.svg',
+        source: 'user',
+        dimensions: Size(600, 600),
+      );
+      for (var index = 0; index < 4; index += 1) {
+        character = character.addSlot(
+          ReactifySlot(
+            id: 'custom.shared.$index',
+            kind: ReactifySlotKind.custom,
+            family: 'custom',
+            name: 'Shared $index',
+            anchorId: 'head',
+            localTransform: AffineMatrix(
+              a: 0.1,
+              b: 0,
+              c: 0,
+              d: 0.1,
+              tx: index * 8,
+              ty: index * 4,
+            ),
+            depth: 900000000 + index,
+            visible: true,
+            asset: sharedAsset,
+          ),
+        );
+      }
+      const scene = ReactifySceneDocument(
+        id: 'scene.perf',
+        name: 'Perf',
+        characters: [
+          ReactifySceneCharacter(
+            id: 'scene_char.perf.1',
+            characterId: 'char.perf',
+            transform: AffineMatrix.identity(),
+          ),
+          ReactifySceneCharacter(
+            id: 'scene_char.perf.2',
+            characterId: 'char.perf',
+            transform: AffineMatrix(a: 1, b: 0, c: 0, d: 1, tx: 40, ty: 0),
+          ),
+          ReactifySceneCharacter(
+            id: 'scene_char.perf.3',
+            characterId: 'char.perf',
+            transform: AffineMatrix(a: 1, b: 0, c: 0, d: 1, tx: 80, ty: 0),
+          ),
+        ],
+      );
+      final characters = {character.id: character};
+      final assetStore = _CountingAssetStore();
+      final bridge = ReactifyRenderBridge(assetStore: assetStore);
+
+      for (var iteration = 0; iteration < 3; iteration += 1) {
+        final resolved = await bridge.buildRenderableScene(scene, characters);
+        final package = await ReactifySvgExporter().exportPackage(
+          scene,
+          characters,
+        );
+
+        expect(
+          resolved.parts.where((part) => part.catalogPart.family == 'custom'),
+          hasLength(12),
+        );
+        expect(
+          package.assets.where((asset) => asset.id == sharedAsset.id),
+          hasLength(1),
+        );
+      }
+
+      expect(assetStore.uncachedLoadCount, 1);
+      expect(assetStore.maxRequestedPathsPerBuild, 1);
+    },
+  );
 }
 
 ReactifyCharacterDocument _editableTestCharacter(String id) {
@@ -841,4 +1065,37 @@ ReactifyCharacterDocument _transformEquivalenceCharacter() {
       ),
     ],
   );
+}
+
+class _CountingAssetStore extends GachaAssetStore {
+  final Map<String, PreparedAsset> _cache = {};
+  int uncachedLoadCount = 0;
+  int maxRequestedPathsPerBuild = 0;
+
+  @override
+  Future<Map<String, PreparedAsset>> loadAll(Set<String> assetPaths) async {
+    if (assetPaths.length > maxRequestedPathsPerBuild) {
+      maxRequestedPathsPerBuild = assetPaths.length;
+    }
+    for (final assetPath in assetPaths) {
+      _cache.putIfAbsent(assetPath, () {
+        uncachedLoadCount += 1;
+        return _TestPreparedAsset(assetPath);
+      });
+    }
+    return {for (final assetPath in assetPaths) assetPath: _cache[assetPath]!};
+  }
+}
+
+class _TestPreparedAsset extends PreparedAsset {
+  const _TestPreparedAsset(String assetPath)
+    : super(assetPath: assetPath, size: const Size(10, 10));
+
+  @override
+  void paint(ui.Canvas canvas, ui.Color? tintColor) {
+    canvas.drawRect(
+      const ui.Rect.fromLTWH(0, 0, 10, 10),
+      ui.Paint()..color = tintColor ?? const ui.Color(0xFF000000),
+    );
+  }
 }

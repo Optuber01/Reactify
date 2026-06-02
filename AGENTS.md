@@ -90,3 +90,5 @@ If Flutter is not on PATH, report that clearly instead of pretending validation 
 - `fronthairrot` is a source-backed frame selector, not geometric rotation.
 - Back hair and ponytail previously double-applied editable target transforms; similar bugs can occur when Flash runtime controls an inner editable target while generated local matrices also bake that target placement.
 - Numeric transform comparison against source traces is preferred over guessed offsets.
+- Reactify-native flattened scenes must use `updateFlatScene`; clear legacy Gacha state when entering flat mode so resize/layout events do not send flattened parts back through the joint renderer.
+- Native preview, SVG export, and PNG export should use the same transform order: scene camera, scene character transform, rig anchor world transform, then slot local transform.

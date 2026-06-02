@@ -5,6 +5,8 @@ import 'package:reactify_gacha/src/gacha/code/gacha_code_parser.dart';
 import 'package:reactify_gacha/src/gacha/data/resolver_tables.dart';
 import 'package:reactify_gacha/src/gacha/render/character_renderer.dart';
 import 'package:reactify_gacha/src/gacha/render/gacha_game_canvas.dart';
+import 'package:reactify_gacha/src/gacha/render/render_part.dart';
+import 'package:reactify_gacha/src/gacha/render/transform_graph.dart';
 import 'package:reactify_gacha/src/gacha/ui/editor_helpers.dart';
 
 void main() {
@@ -152,6 +154,37 @@ void main() {
     expect(rootTransform.d, greaterThan(0));
   });
 
+  test('flat native scene remains flat after resize', () async {
+    final source = await fixture('fixtures/default_boy.gc.txt');
+    final state = parser.parse(source);
+    final legacyScene = await renderer.buildScene(state);
+    final game = GachaGameCanvas();
+    final flatPart = ResolvedRenderPart(
+      catalogPart: _testCatalogPart,
+      localTransform: AffineMatrix.translation(25, 35),
+      targetJoint: 'head',
+      tintColor: null,
+      globalDepth: 1,
+    );
+    final flatScene = ResolvedScene(
+      parts: [flatPart],
+      assets: const {},
+      worldBounds: const Rect.fromLTWH(0, 0, 100, 100),
+      warnings: const [],
+    );
+
+    game.onGameResize(Vector2(1000, 1200));
+    game.updateScene(legacyScene, state, tables);
+    game.updateFlatScene(flatScene);
+    expect(game.partTransformForDebug(flatPart)!.tx, 25);
+    expect(game.partTransformForDebug(flatPart)!.ty, 35);
+
+    game.onGameResize(Vector2(800, 900));
+
+    expect(game.partTransformForDebug(flatPart)!.tx, 25);
+    expect(game.partTransformForDebug(flatPart)!.ty, 35);
+  });
+
   test('transform control fields update exported fields', () async {
     final source = await fixture('fixtures/default_boy.gc.txt');
     final state = parser.parse(source);
@@ -181,3 +214,32 @@ void main() {
     expect(reparsed.numeric('shieldxpos'), state.numeric('shieldxpos') + 4);
   });
 }
+
+const _testCatalogPart = RenderCatalogPart(
+  family: 'test',
+  chooserFrame: 0,
+  partRole: 'test',
+  orderedPartIndex: 0,
+  leafId: 'test_leaf',
+  originalAssetPath: '',
+  appAssetPath: '',
+  assetKind: 'svg',
+  tintChannel: 'none',
+  visibilityRule: '',
+  namePath: '',
+  characterPath: '',
+  depthPath: '',
+  framePath: '',
+  hostScope: '',
+  hostName: '',
+  hostChildName: '',
+  hostDepthPath: '',
+  runtimeAnchorX: 0,
+  runtimeAnchorY: 0,
+  dependencyField: '',
+  dependencyValue: null,
+  sizeTable: '',
+  rootSpriteId: '',
+  localMatrix: AffineMatrix.identity(),
+  notes: '',
+);

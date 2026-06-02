@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -6,12 +7,12 @@ import '../code/gacha_character_state.dart';
 import '../code/gacha_code_parser.dart';
 import '../code/gacha_field_schema.dart';
 import '../data/resolver_tables.dart';
+import '../../reactify/export/reactify_svg_exporter.dart';
 import '../../reactify/legacy/gacha_to_reactify_adapter.dart';
 import '../../reactify/model/reactify_document.dart';
 import '../../reactify/render/reactify_render_bridge.dart';
 import '../render/character_renderer.dart';
 import '../render/gacha_game_canvas.dart';
-import '../render/gacha_joint_component.dart';
 import '../render/render_part.dart';
 import '../render/transform_graph.dart';
 import 'widgets/collapsible_sidebar.dart';
@@ -96,9 +97,13 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
   GachaCharacterState? _baselineState;
   GachaCharacterState? _currentState;
   ReactifyCharacterDocument? _reactifyCharacter;
+  ReactifySceneDocument? _reactifyScene;
+  Map<String, ReactifyCharacterDocument> _reactifyCharacters = const {};
+  final List<ReactifySlot> _customSlots = [];
   int _reactifyResolvedPartCount = 0;
   ResolvedScene? _scene;
   bool _sceneLoading = false;
+  bool _hideNativeHair = false;
   String? _messageText;
   bool _messageIsError = false;
   int _renderSerial = 0;
@@ -118,24 +123,119 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
   }
 
   void _handleStrokesDrawn(List<Offset> stroke) {
-    try {
-      final headJoint = _game
-          .descendants()
-          .whereType<GachaJointComponent>()
-          .firstWhere((j) => j.name == 'head');
-      headJoint.addDrawingStroke(stroke);
+    final currentState = _currentState;
+    final character = _reactifyCharacter;
+    final scene = _reactifyScene;
+    if (currentState == null || character == null || scene == null) {
       setState(() {
         _messageText =
-            'Rigged vector stroke with ${stroke.length} points directly onto the head joint!';
-        _messageIsError = false;
-      });
-    } catch (e) {
-      setState(() {
-        _messageText =
-            'Captured stroke with ${stroke.length} points, but failed to rig onto head joint: $e';
+            'Captured stroke with ${stroke.length} points, but no native scene is loaded.';
         _messageIsError = true;
       });
+      return;
     }
+    final slot = _customDrawingSlotForStroke(stroke, character, scene);
+    _customSlots.add(slot);
+    _setCurrentState(
+      currentState,
+      selectedField: _selectedField,
+      messageText:
+          'Added a native vector drawing slot with ${stroke.length} points.',
+    );
+  }
+
+  ReactifySlot _customDrawingSlotForStroke(
+    List<Offset> screenStroke,
+    ReactifyCharacterDocument character,
+    ReactifySceneDocument scene,
+  ) {
+    final sceneCharacter = scene.characters.firstWhere(
+      (item) => item.characterId == character.id,
+      orElse: () => scene.characters.first,
+    );
+    final anchorWorld = _anchorWorldTransforms(character.rig);
+    final headWorld =
+        anchorWorld['head'] ??
+        anchorWorld['torso'] ??
+        const AffineMatrix.identity();
+    final viewport = _game.rootTransform ?? const AffineMatrix.identity();
+    final screenToHead = viewport
+        .multiply(sceneCharacter.transform)
+        .multiply(headWorld)
+        .inverse();
+    final headPoints = [
+      for (final point in screenStroke) screenToHead.transformPoint(point),
+    ];
+    final bounds = _pointBounds(headPoints).inflate(2);
+    final normalized = [
+      for (final point in headPoints)
+        {'x': point.dx - bounds.left, 'y': point.dy - bounds.top},
+    ];
+    final slotId = 'custom.drawing.${DateTime.now().microsecondsSinceEpoch}';
+    return ReactifySlot(
+      id: slotId,
+      kind: ReactifySlotKind.custom,
+      family: 'custom',
+      name: 'Drawing',
+      anchorId: 'head',
+      localTransform: AffineMatrix.translation(bounds.left, bounds.top),
+      depth: 900000000 + _customSlots.length,
+      visible: true,
+      asset: ReactifyAssetRef(
+        id: '$slotId.asset',
+        kind: ReactifyAssetKind.drawing,
+        uri: 'reactify://drawing/$slotId',
+        source: 'user',
+      ),
+      metadata: {
+        'source': 'user_drawing',
+        'drawingColor': '#00F5FF',
+        'drawingStrokeWidth': 3.5,
+        'drawingStrokes': [normalized],
+      },
+    );
+  }
+
+  Rect _pointBounds(List<Offset> points) {
+    if (points.isEmpty) {
+      return const Rect.fromLTWH(0, 0, 1, 1);
+    }
+    var left = points.first.dx;
+    var right = points.first.dx;
+    var top = points.first.dy;
+    var bottom = points.first.dy;
+    for (final point in points.skip(1)) {
+      if (point.dx < left) left = point.dx;
+      if (point.dx > right) right = point.dx;
+      if (point.dy < top) top = point.dy;
+      if (point.dy > bottom) bottom = point.dy;
+    }
+    return Rect.fromLTRB(left, top, right, bottom);
+  }
+
+  Map<String, AffineMatrix> _anchorWorldTransforms(ReactifyRigTemplate rig) {
+    final resolved = <String, AffineMatrix>{};
+    AffineMatrix resolve(String id) {
+      final existing = resolved[id];
+      if (existing != null) {
+        return existing;
+      }
+      final anchor = rig.anchors[id];
+      if (anchor == null) {
+        return const AffineMatrix.identity();
+      }
+      final parentId = anchor.parentId;
+      final matrix = parentId == null
+          ? anchor.localTransform
+          : resolve(parentId).multiply(anchor.localTransform);
+      resolved[id] = matrix;
+      return matrix;
+    }
+
+    for (final id in rig.anchors.keys) {
+      resolve(id);
+    }
+    return resolved;
   }
 
   @override
@@ -235,10 +335,14 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
                       tables: widget.tables,
                       colorDrafts: _colorDrafts,
                       selectedField: _selectedField,
+                      hideNativeHair: _hideNativeHair,
                       onImportPressed: _importFromTextarea,
                       onExportPressed: _exportCurrentState,
+                      onExportNativeSvgPressed: _exportNativeSvg,
+                      onExportNativePngPressed: _exportNativePng,
                       onResetToFixturePressed: _resetToSelectedFixture,
                       onResetToBaselinePressed: _resetToBaseline,
+                      onNativeHairOverrideChanged: _toggleNativeHairOverride,
                       onNumericFieldChanged: _updateNumericField,
                       onColorDraftChanged: _updateColorDraft,
                       onColorCommit: _commitColorField,
@@ -294,6 +398,7 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
       final state = _parser.parse(normalized);
       _codeController.text = normalized;
       _colorDrafts.clear();
+      _customSlots.clear();
       await _setCurrentState(
         state,
         baselineState: state,
@@ -331,6 +436,69 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
           'Exported the current 445-field code to the editor buffer.';
       _messageIsError = false;
     });
+  }
+
+  Future<void> _exportNativeSvg() async {
+    final scene = _reactifyScene;
+    if (scene == null || _reactifyCharacters.isEmpty) {
+      return;
+    }
+    try {
+      final package = await ReactifySvgExporter().exportPackage(
+        scene,
+        _reactifyCharacters,
+      );
+      _codeController.text = package.svg;
+      setState(() {
+        _messageText =
+            'Exported editable native SVG with ${package.assets.length} asset references to the editor buffer.';
+        _messageIsError = false;
+      });
+    } catch (error) {
+      setState(() {
+        _messageText = 'Failed to export native SVG: $error';
+        _messageIsError = true;
+      });
+    }
+  }
+
+  Future<void> _exportNativePng() async {
+    final scene = _reactifyScene;
+    if (scene == null || _reactifyCharacters.isEmpty) {
+      return;
+    }
+    try {
+      final bytes = await ReactifyPngExporter(
+        bridge: _reactifyBridge,
+      ).exportScene(scene, _reactifyCharacters);
+      _codeController.text = 'data:image/png;base64,${base64Encode(bytes)}';
+      setState(() {
+        _messageText = 'Exported native PNG data URI to the editor buffer.';
+        _messageIsError = false;
+      });
+    } catch (error) {
+      setState(() {
+        _messageText = 'Failed to export native PNG: $error';
+        _messageIsError = true;
+      });
+    }
+  }
+
+  Future<void> _toggleNativeHairOverride(bool value) async {
+    final currentState = _currentState;
+    if (currentState == null || _hideNativeHair == value) {
+      return;
+    }
+    setState(() {
+      _hideNativeHair = value;
+    });
+    await _setCurrentState(
+      currentState,
+      selectedField: _selectedField,
+      messageText: value
+          ? 'Applied a native semantic hair-slot override.'
+          : 'Removed the native semantic hair-slot override.',
+    );
   }
 
   Future<void> _resetToBaseline() async {
@@ -459,36 +627,26 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
       }
     });
     try {
-      final scene = await _renderer.buildScene(next);
-      final reactifyCharacter = _reactifyAdapter.migrate(
-        next,
-        id: 'char.current',
+      final bundle = _buildReactifySceneBundle(next);
+      final scene = await _reactifyBridge.buildRenderableScene(
+        bundle.scene,
+        bundle.characters,
       );
-      final reactifyScene = const ReactifySceneDocument(
-        id: 'scene.current',
-        name: 'Current Character',
-        characters: [
-          ReactifySceneCharacter(
-            id: 'scene_char.current',
-            characterId: 'char.current',
-            transform: AffineMatrix.identity(),
-          ),
-        ],
-      );
-      final reactifyResolvedPartCount = _reactifyBridge.resolveSceneParts(
-        reactifyScene,
-        {reactifyCharacter.id: reactifyCharacter},
-      ).length;
+      final reactifyResolvedPartCount = _reactifyBridge
+          .resolveSceneParts(bundle.scene, bundle.characters)
+          .length;
       if (!mounted || serial != _renderSerial) {
         return;
       }
       setState(() {
         _scene = scene;
-        _reactifyCharacter = reactifyCharacter;
+        _reactifyCharacter = bundle.currentCharacter;
+        _reactifyScene = bundle.scene;
+        _reactifyCharacters = bundle.characters;
         _reactifyResolvedPartCount = reactifyResolvedPartCount;
         _sceneLoading = false;
       });
-      _game.updateScene(scene, next, widget.tables);
+      _game.updateFlatScene(scene);
     } catch (error) {
       if (!mounted || serial != _renderSerial) {
         return;
@@ -502,9 +660,112 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
     }
   }
 
+  _ReactifyEditorSceneBundle _buildReactifySceneBundle(
+    GachaCharacterState currentState,
+  ) {
+    var currentCharacter = _reactifyAdapter.migrate(
+      currentState,
+      id: 'char.current',
+    );
+    for (final slot in _customSlots) {
+      currentCharacter = currentCharacter.addSlot(slot);
+    }
+    final characters = <String, ReactifyCharacterDocument>{
+      currentCharacter.id: currentCharacter,
+    };
+    final sceneCharacters = <ReactifySceneCharacter>[];
+    final baselineState = _baselineState;
+    final isComparison =
+        baselineState != null &&
+        baselineState.serializeCode() != currentState.serializeCode();
+    if (isComparison) {
+      final baselineCharacter = _reactifyAdapter.migrate(
+        baselineState,
+        id: 'char.baseline',
+      );
+      characters[baselineCharacter.id] = baselineCharacter;
+      sceneCharacters.add(
+        const ReactifySceneCharacter(
+          id: 'scene_char.baseline',
+          characterId: 'char.baseline',
+          transform: AffineMatrix(
+            a: 0.92,
+            b: 0,
+            c: 0,
+            d: 0.92,
+            tx: -260,
+            ty: 0,
+          ),
+          pose: 'baseline',
+        ),
+      );
+      sceneCharacters.add(
+        ReactifySceneCharacter(
+          id: 'scene_char.current',
+          characterId: 'char.current',
+          transform: const AffineMatrix(
+            a: 0.92,
+            b: 0,
+            c: 0,
+            d: 0.92,
+            tx: 260,
+            ty: 0,
+          ),
+          pose: 'current',
+          slotOverrides: _nativeSlotOverrides(currentCharacter),
+        ),
+      );
+    } else {
+      sceneCharacters.add(
+        ReactifySceneCharacter(
+          id: 'scene_char.current',
+          characterId: 'char.current',
+          transform: const AffineMatrix.identity(),
+          pose: 'current',
+          slotOverrides: _nativeSlotOverrides(currentCharacter),
+        ),
+      );
+    }
+    return _ReactifyEditorSceneBundle(
+      currentCharacter: currentCharacter,
+      scene: ReactifySceneDocument(
+        id: 'scene.current',
+        name: 'Current Native Scene',
+        characters: sceneCharacters,
+      ),
+      characters: characters,
+    );
+  }
+
+  Map<String, ReactifySlotOverride> _nativeSlotOverrides(
+    ReactifyCharacterDocument character,
+  ) {
+    if (!_hideNativeHair) {
+      return const {};
+    }
+    for (final slot in character.semanticSlots) {
+      if (slot.family == 'hair') {
+        return {slot.id: const ReactifySlotOverride(visible: false)};
+      }
+    }
+    return const {};
+  }
+
   ValidationCaseDescriptor _fixtureDescriptorFor(String id) {
     return widget.tables.editorFixtures.firstWhere((item) => item.id == id);
   }
+}
+
+class _ReactifyEditorSceneBundle {
+  const _ReactifyEditorSceneBundle({
+    required this.currentCharacter,
+    required this.scene,
+    required this.characters,
+  });
+
+  final ReactifyCharacterDocument currentCharacter;
+  final ReactifySceneDocument scene;
+  final Map<String, ReactifyCharacterDocument> characters;
 }
 
 class _HeaderBar extends StatelessWidget {
@@ -936,10 +1197,14 @@ class _EditorInspector extends StatelessWidget {
     required this.tables,
     required this.colorDrafts,
     required this.selectedField,
+    required this.hideNativeHair,
     required this.onImportPressed,
     required this.onExportPressed,
+    required this.onExportNativeSvgPressed,
+    required this.onExportNativePngPressed,
     required this.onResetToFixturePressed,
     required this.onResetToBaselinePressed,
+    required this.onNativeHairOverrideChanged,
     required this.onNumericFieldChanged,
     required this.onColorDraftChanged,
     required this.onColorCommit,
@@ -959,10 +1224,14 @@ class _EditorInspector extends StatelessWidget {
   final ResolverTables tables;
   final Map<String, String> colorDrafts;
   final String? selectedField;
+  final bool hideNativeHair;
   final VoidCallback onImportPressed;
   final VoidCallback onExportPressed;
+  final VoidCallback onExportNativeSvgPressed;
+  final VoidCallback onExportNativePngPressed;
   final VoidCallback onResetToFixturePressed;
   final VoidCallback onResetToBaselinePressed;
+  final ValueChanged<bool> onNativeHairOverrideChanged;
   final Future<void> Function(String field, int value) onNumericFieldChanged;
   final void Function(String field, String value) onColorDraftChanged;
   final Future<void> Function(String field) onColorCommit;
@@ -1019,6 +1288,14 @@ class _EditorInspector extends StatelessWidget {
                       child: const Text('Export To Buffer'),
                     ),
                     OutlinedButton(
+                      onPressed: onExportNativeSvgPressed,
+                      child: const Text('Export Native SVG'),
+                    ),
+                    OutlinedButton(
+                      onPressed: onExportNativePngPressed,
+                      child: const Text('Export Native PNG'),
+                    ),
+                    OutlinedButton(
                       onPressed: onResetToFixturePressed,
                       child: const Text('Reset To Selected Fixture'),
                     ),
@@ -1027,6 +1304,14 @@ class _EditorInspector extends StatelessWidget {
                       child: const Text('Reset To Imported Baseline'),
                     ),
                   ],
+                ),
+                const SizedBox(height: 12),
+                SwitchListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Hide native hair slot'),
+                  value: hideNativeHair,
+                  onChanged: onNativeHairOverrideChanged,
                 ),
                 const SizedBox(height: 12),
                 Wrap(

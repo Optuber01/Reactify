@@ -15,6 +15,7 @@ Read this file before working in this repository. Keep it concise and update it 
 - Preserve user or previous-agent changes unless the user explicitly asks for cleanup.
 - Keep local validation, scratch files, render exports, and agent artifacts out of Git.
 - Do not stage or commit `app/test`, `app/tmp`, `app/tmp_scene_dump.json`, Flutter crash logs, or generated render exports.
+- Do not stage or commit private asset-pack paths from this repo: `app/assets/gacha` or `app/assets/data/generated`.
 
 ## Dependency Rules
 
@@ -46,13 +47,22 @@ Original reference/source/assets:
 
 - `D:\Client Projects\reactify\REFRENCES\Some gacha App`
 
+Private runtime asset pack:
+
+- GitHub: `https://github.com/Optuber01/Reactify-Assets`
+- Local sibling path: `D:\Client Projects\Reactify-Assets`
+- Provides `app/assets/gacha` and `app/assets/data/generated`
+- Uses Git LFS for PNG and generated CSV payloads
+- Keep this asset repo private. Do not publish or mirror compatibility assets without explicit rights.
+
 Important areas:
 
 - Code parsing/state: `app/lib/src/gacha/code`
 - Data loading: `app/lib/src/gacha/data`
 - Renderer: `app/lib/src/gacha/render`
 - UI: `app/lib/src/gacha/ui`
-- Generated app data: `app/assets/data`
+- Tracked app data: `app/assets/data/asset-resolution`, `app/assets/data/schema`, `app/assets/data/swf-frame-placements`
+- Private local asset data: `app/assets/data/generated`, `app/assets/gacha`
 - Fixtures: `app/fixtures`
 - Local-only tests: `app/test`
 - Local-only render parity outputs: `app/tmp/render_exports`
@@ -73,6 +83,8 @@ The current branch contains a Flame-based live renderer. It resolves a Flash-lik
 ## Validation Commands
 
 Run from `app` when Flutter is available. `app/test` is local-only and intentionally ignored by Git; use it if present, but do not stage it.
+
+Before building or running render tests, make sure the private asset pack is synced into this checkout. The expected local paths are `app/assets/gacha` and `app/assets/data/generated`. If they are missing, copy or mirror them from `D:\Client Projects\Reactify-Assets` after cloning/pulling `https://github.com/Optuber01/Reactify-Assets`. Do not regenerate or commit those assets in the app repo.
 
 - `dart format lib test`
 - `flutter analyze`

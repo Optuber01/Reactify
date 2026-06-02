@@ -18,6 +18,8 @@
 /app/.flutter-plugins-dependencies
 /app/build/
 /app/tmp/
+/app/test/
+/app/tmp_scene_dump.json
 /app/app.*.symbols
 /app/app.*.map.json
 /app/*.log

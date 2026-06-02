@@ -13,6 +13,8 @@ Read this file before working in this repository. Keep it concise and update it 
 - Do not claim full Gacha Club parity unless visual comparison supports it.
 - Passing tests is necessary but not sufficient; visual correctness matters.
 - Preserve user or previous-agent changes unless the user explicitly asks for cleanup.
+- Keep local validation, scratch files, render exports, and agent artifacts out of Git.
+- Do not stage or commit `app/test`, `app/tmp`, `app/tmp_scene_dump.json`, Flutter crash logs, or generated render exports.
 
 ## Dependency Rules
 
@@ -52,7 +54,8 @@ Important areas:
 - UI: `app/lib/src/gacha/ui`
 - Generated app data: `app/assets/data`
 - Fixtures: `app/fixtures`
-- Render parity outputs: `app/tmp/render_exports`
+- Local-only tests: `app/test`
+- Local-only render parity outputs: `app/tmp/render_exports`
 - Generators: `tools`
 - Research docs: `docs`
 
@@ -69,7 +72,7 @@ The current branch contains a Flame-based live renderer. It resolves a Flash-lik
 
 ## Validation Commands
 
-Run from `app` when Flutter is available:
+Run from `app` when Flutter is available. `app/test` is local-only and intentionally ignored by Git; use it if present, but do not stage it.
 
 - `dart format lib test`
 - `flutter analyze`
@@ -78,7 +81,7 @@ Run from `app` when Flutter is available:
 - `flutter test test\gacha_dj_girl_visual_parity_test.dart`
 - `flutter build windows`
 
-If Flutter is not on PATH, report that clearly instead of pretending validation passed.
+If the local test suite is missing, do not recreate or commit tests just to satisfy validation. Run `dart format lib`, `flutter analyze`, and `flutter build windows`, then report that local tests were unavailable. If Flutter is not on PATH, report that clearly instead of pretending validation passed.
 
 ## Important Lessons
 

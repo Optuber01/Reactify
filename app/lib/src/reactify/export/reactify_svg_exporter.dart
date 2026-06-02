@@ -1,7 +1,11 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/services.dart';
 
+import '../../gacha/render/render_part.dart';
 import '../../gacha/render/transform_graph.dart';
 import '../model/reactify_document.dart';
+import '../render/reactify_render_bridge.dart';
 
 class ReactifySvgPackage {
   const ReactifySvgPackage({
@@ -89,7 +93,9 @@ class ReactifySvgExporter {
             uri: asset.uri,
             kind: asset.kind,
             source: asset.source,
-            inlined: inlineSvgById.containsKey(asset.id),
+            inlined:
+                inlineSvgById.containsKey(asset.id) ||
+                asset.kind == ReactifyAssetKind.drawing,
           ),
       ],
       inlinedAssetIds: inlineSvgById.keys.toSet(),
@@ -161,6 +167,7 @@ class ReactifySvgExporter {
       'data-pose="${_xml(sceneCharacter.pose ?? '')}" '
       'transform="${_matrix(sceneCharacter.transform)}">',
     );
+    final anchorWorld = _anchorWorldTransforms(character.rig);
     final slots = _effectiveSlots(character, sceneCharacter).toList()
       ..sort((left, right) {
         final depthCompare = left.depth.compareTo(right.depth);
@@ -171,7 +178,16 @@ class ReactifySvgExporter {
       if (!slot.visible) {
         continue;
       }
-      _writeSlot(buffer, slot, inlineSvgById);
+      final parentWorld =
+          anchorWorld[slot.anchorId] ??
+          anchorWorld['torso'] ??
+          const AffineMatrix.identity();
+      _writeSlot(
+        buffer,
+        slot,
+        inlineSvgById,
+        parentWorld.multiply(slot.localTransform),
+      );
     }
     if (sceneCharacter.dialogue != null) {
       buffer.writeln(
@@ -185,6 +201,7 @@ class ReactifySvgExporter {
     StringBuffer buffer,
     ReactifySlot slot,
     Map<String, String> inlineSvgById,
+    AffineMatrix transform,
   ) {
     buffer.writeln(
       '<g id="${_xml(slot.id)}" '
@@ -194,7 +211,7 @@ class ReactifySvgExporter {
       'data-anchor="${_xml(slot.anchorId)}" '
       'data-depth="${slot.depth}" '
       '${_metadataAttributes(slot.metadata)}'
-      'transform="${_matrix(slot.localTransform)}">',
+      'transform="${_matrix(transform)}">',
     );
     if (slot.childSlotIds.isNotEmpty) {
       buffer.writeln(
@@ -203,7 +220,11 @@ class ReactifySvgExporter {
     }
     final asset = slot.asset;
     if (asset != null && asset.uri.isNotEmpty) {
-      _writeAsset(buffer, '${slot.id}.asset', asset, inlineSvgById);
+      if (asset.kind == ReactifyAssetKind.drawing) {
+        _writeDrawingAsset(buffer, '${slot.id}.asset', asset, slot.metadata);
+      } else {
+        _writeAsset(buffer, '${slot.id}.asset', asset, inlineSvgById);
+      }
     }
     buffer.writeln('</g>');
   }
@@ -249,6 +270,30 @@ class ReactifySvgExporter {
       'data-reactify-asset-id="${_xml(asset.id)}" '
       'data-reactify-asset-kind="${_xml(asset.kind.name)}" />',
     );
+  }
+
+  void _writeDrawingAsset(
+    StringBuffer buffer,
+    String id,
+    ReactifyAssetRef asset,
+    Map<String, Object?> metadata,
+  ) {
+    buffer.writeln(
+      '<g id="${_xml(id)}" data-reactify-asset-id="${_xml(asset.id)}" '
+      'data-reactify-asset-kind="${_xml(asset.kind.name)}">',
+    );
+    final color = _xml(_metadataString(metadata, 'drawingColor', '#00F5FF'));
+    final strokeWidth = _num(
+      _metadataDouble(metadata, 'drawingStrokeWidth', 3.5),
+    );
+    for (final path in _drawingPaths(metadata)) {
+      buffer.writeln(
+        '<path d="${_xml(path)}" fill="none" stroke="$color" '
+        'stroke-width="$strokeWidth" stroke-linecap="round" '
+        'stroke-linejoin="round" data-reactify-drawing="stroke" />',
+      );
+    }
+    buffer.writeln('</g>');
   }
 
   Map<String, ReactifyAssetRef> _collectAssets(
@@ -306,6 +351,31 @@ class ReactifySvgExporter {
     }
   }
 
+  Map<String, AffineMatrix> _anchorWorldTransforms(ReactifyRigTemplate rig) {
+    final resolved = <String, AffineMatrix>{};
+    AffineMatrix resolve(String id) {
+      final existing = resolved[id];
+      if (existing != null) {
+        return existing;
+      }
+      final anchor = rig.anchors[id];
+      if (anchor == null) {
+        return const AffineMatrix.identity();
+      }
+      final parentId = anchor.parentId;
+      final matrix = parentId == null
+          ? anchor.localTransform
+          : resolve(parentId).multiply(anchor.localTransform);
+      resolved[id] = matrix;
+      return matrix;
+    }
+
+    for (final id in rig.anchors.keys) {
+      resolve(id);
+    }
+    return resolved;
+  }
+
   static String _metadataAttributes(Map<String, Object?> metadata) {
     final names = [
       'legacyFamily',
@@ -333,6 +403,35 @@ class ReactifySvgExporter {
         .trim();
   }
 
+  static List<String> _drawingPaths(Map<String, Object?> metadata) {
+    final raw = metadata['drawingStrokes'];
+    if (raw is! List) {
+      return const [];
+    }
+    final paths = <String>[];
+    for (final stroke in raw) {
+      if (stroke is! List || stroke.length < 2) {
+        continue;
+      }
+      final points = [
+        for (final point in stroke)
+          if (point is Map)
+            (x: _objectDouble(point['x']), y: _objectDouble(point['y'])),
+      ];
+      if (points.length < 2) {
+        continue;
+      }
+      final buffer = StringBuffer(
+        'M ${_num(points.first.x)} ${_num(points.first.y)}',
+      );
+      for (var i = 1; i < points.length; i++) {
+        buffer.write(' L ${_num(points[i].x)} ${_num(points[i].y)}');
+      }
+      paths.add(buffer.toString());
+    }
+    return paths;
+  }
+
   static String _matrix(AffineMatrix matrix) {
     return 'matrix(${_num(matrix.a)} ${_num(matrix.b)} ${_num(matrix.c)} '
         '${_num(matrix.d)} ${_num(matrix.tx)} ${_num(matrix.ty)})';
@@ -354,5 +453,91 @@ class ReactifySvgExporter {
         .replaceAll('"', '&quot;')
         .replaceAll('<', '&lt;')
         .replaceAll('>', '&gt;');
+  }
+
+  static String _metadataString(
+    Map<String, Object?> metadata,
+    String key,
+    String fallback,
+  ) {
+    final value = metadata[key];
+    return value == null ? fallback : '$value';
+  }
+
+  static double _metadataDouble(
+    Map<String, Object?> metadata,
+    String key,
+    double fallback,
+  ) {
+    final value = metadata[key];
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is String) return double.tryParse(value) ?? fallback;
+    return fallback;
+  }
+
+  static double _objectDouble(Object? value) {
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is String) return double.tryParse(value) ?? 0;
+    return 0;
+  }
+}
+
+class ReactifyPngExporter {
+  const ReactifyPngExporter({required this.bridge});
+
+  final ReactifyRenderBridge bridge;
+
+  Future<Uint8List> exportScene(
+    ReactifySceneDocument scene,
+    Map<String, ReactifyCharacterDocument> characters, {
+    ui.Color? backgroundColor,
+  }) async {
+    final resolved = await bridge.buildRenderableScene(scene, characters);
+    final image = await renderResolvedScene(
+      resolved,
+      scene.canvasSize,
+      backgroundColor: backgroundColor,
+    );
+    final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+    image.dispose();
+    if (byteData == null) {
+      throw StateError('Unable to encode native scene PNG.');
+    }
+    return byteData.buffer.asUint8List();
+  }
+
+  static Future<ui.Image> renderResolvedScene(
+    ResolvedScene scene,
+    ui.Size size, {
+    ui.Color? backgroundColor,
+  }) async {
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder);
+    if (backgroundColor != null) {
+      canvas.drawRect(
+        ui.Rect.fromLTWH(0, 0, size.width, size.height),
+        ui.Paint()..color = backgroundColor,
+      );
+    }
+    for (final part in scene.parts) {
+      final asset = scene.assets[part.catalogPart.appAssetPath];
+      if (asset == null) {
+        continue;
+      }
+      canvas.save();
+      canvas.transform(part.localTransform.toFloat64List());
+      canvas.translate(
+        part.catalogPart.runtimeAnchorX,
+        part.catalogPart.runtimeAnchorY,
+      );
+      asset.paint(canvas, part.tintColor);
+      canvas.restore();
+    }
+    return recorder.endRecording().toImage(
+      size.width.toInt(),
+      size.height.toInt(),
+    );
   }
 }

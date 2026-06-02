@@ -15,6 +15,7 @@ class GachaGameCanvas extends FlameGame {
   GachaCharacterState? _state;
   ResolverTables? _tables;
   GachaJointComponent? _rootComponent;
+  bool _jointRigInitialized = false;
 
   final Map<String, GachaPartComponent> _componentsByKey = {};
 
@@ -33,6 +34,9 @@ class GachaGameCanvas extends FlameGame {
   ResolvedScene? get scene => _scene;
   int get activePartComponentCount => _componentsByKey.length;
   AffineMatrix? get rootTransform => _rootComponent?.localMatrix;
+  AffineMatrix? partTransformForDebug(ResolvedRenderPart part) {
+    return _componentsByKey[_partKey(part)]?.localMatrix;
+  }
 
   set scene(ResolvedScene? newScene) {
     if (_scene == newScene) return;
@@ -47,6 +51,8 @@ class GachaGameCanvas extends FlameGame {
     final tables = _tables;
     if (scene != null && state != null && tables != null) {
       updateScene(scene, state, tables);
+    } else if (scene != null) {
+      updateFlatScene(scene);
     }
   }
 
@@ -59,11 +65,8 @@ class GachaGameCanvas extends FlameGame {
     _state = state;
     _tables = tables;
 
-    if (_rootComponent == null) {
-      final root = GachaJointComponent(name: 'root');
-      _rootComponent = root;
-      add(root);
-
+    _ensureRootComponent();
+    if (!_jointRigInitialized) {
       _torso = GachaJointComponent(name: 'torso');
       _head = GachaJointComponent(name: 'head');
       _shoulderFront = GachaJointComponent(name: 'shoulder_front');
@@ -76,7 +79,7 @@ class GachaGameCanvas extends FlameGame {
       _feetFront = GachaJointComponent(name: 'feet_front');
       _feetBack = GachaJointComponent(name: 'feet_back');
 
-      root.add(_torso);
+      _rootComponent!.add(_torso);
       _torso.add(_head);
       _torso.add(_shoulderFront);
       _torso.add(_shoulderBack);
@@ -87,6 +90,7 @@ class GachaGameCanvas extends FlameGame {
       _hip.add(_thighBack);
       _thighFront.add(_feetFront);
       _thighBack.add(_feetBack);
+      _jointRigInitialized = true;
     }
 
     final heightX = tables.runtimeValueMaps.resolve(
@@ -227,6 +231,60 @@ class GachaGameCanvas extends FlameGame {
       final comp = _componentsByKey.remove(key)!;
       comp.removeFromParent();
     }
+  }
+
+  void updateFlatScene(ResolvedScene scene) {
+    _scene = scene;
+    _state = null;
+    _tables = null;
+
+    _ensureRootComponent();
+
+    _applyLocalTransform(_rootComponent!, _viewportTransform(scene));
+
+    final newKeys = <String>{};
+    for (final part in scene.parts) {
+      final key = _partKey(part);
+      newKeys.add(key);
+
+      final asset = scene.assets[part.catalogPart.appAssetPath];
+      if (_componentsByKey.containsKey(key)) {
+        final comp = _componentsByKey[key]!;
+        comp.updatePart(part, asset, part.localTransform);
+
+        if (comp.parent != _rootComponent) {
+          comp.removeFromParent();
+          _rootComponent!.add(comp);
+        }
+      } else {
+        final comp = GachaPartComponent(
+          part: part,
+          asset: asset,
+          tintColor: part.tintColor,
+          globalDepth: part.globalDepth,
+          localMatrix: part.localTransform,
+        );
+        _rootComponent!.add(comp);
+        _componentsByKey[key] = comp;
+      }
+    }
+
+    final keysToRemove = _componentsByKey.keys
+        .where((key) => !newKeys.contains(key))
+        .toList();
+    for (final key in keysToRemove) {
+      final comp = _componentsByKey.remove(key)!;
+      comp.removeFromParent();
+    }
+  }
+
+  void _ensureRootComponent() {
+    if (_rootComponent != null) {
+      return;
+    }
+    final root = GachaJointComponent(name: 'root');
+    _rootComponent = root;
+    add(root);
   }
 
   AffineMatrix _viewportTransform(ResolvedScene scene) {

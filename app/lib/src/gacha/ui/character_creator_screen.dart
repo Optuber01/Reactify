@@ -134,7 +134,9 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
     }
     final slot = _customDrawingSlotForStroke(stroke, character, sceneCharacter);
     _applyNativeEditor(
-      editor.addCustomSlotToSelectedCharacter(slot),
+      editor
+          .registerAsset(_registeredAssetForSlot(slot))
+          .addCustomSlotToSelectedCharacter(slot),
       messageText:
           'Added a native vector drawing slot with ${stroke.length} points.',
     );
@@ -181,6 +183,8 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
         kind: ReactifyAssetKind.drawing,
         uri: 'reactify://drawing/$slotId',
         source: 'user',
+        dimensions: bounds.size,
+        metadata: {'source': 'user_drawing'},
       ),
       metadata: {
         'source': 'user_drawing',
@@ -188,6 +192,22 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
         'drawingStrokeWidth': 3.5,
         'drawingStrokes': [normalized],
       },
+    );
+  }
+
+  ReactifyRegisteredAsset _registeredAssetForSlot(ReactifySlot slot) {
+    final asset = slot.asset;
+    if (asset == null) {
+      throw StateError('Custom slot has no asset to register.');
+    }
+    return ReactifyRegisteredAsset(
+      id: asset.id,
+      kind: asset.kind,
+      uri: asset.uri,
+      source: asset.source,
+      preserveVector: asset.preserveVector,
+      dimensions: asset.dimensions,
+      metadata: {...asset.metadata, 'slotId': slot.id},
     );
   }
 
@@ -341,6 +361,11 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
                       onResetToFixturePressed: _resetToSelectedFixture,
                       onResetToBaselinePressed: _resetToBaseline,
                       onNativeHairOverrideChanged: _toggleNativeHairOverride,
+                      onNativeSceneCharacterAdded: _addNativeSceneCharacter,
+                      onNativeSceneCharacterRemoved:
+                          _removeSelectedNativeSceneCharacter,
+                      onNativeRegisteredAssetAttached:
+                          _attachRegisteredNativeAssetSlot,
                       onNativeSceneCharacterSelected: (sceneCharacterId) {
                         _selectNativeSceneCharacter(sceneCharacterId);
                       },
@@ -882,6 +907,102 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
     );
   }
 
+  Future<void> _addNativeSceneCharacter() async {
+    final editor = _nativeEditor;
+    final selectedDocument = editor?.selectedCharacterDocument;
+    if (editor == null || selectedDocument == null) {
+      return;
+    }
+    final id = _nextSceneCharacterId(editor, 'scene_char.native');
+    final index = editor.scene.characters.length;
+    await _applyNativeEditor(
+      editor.addSceneCharacter(
+        sceneCharacter: ReactifySceneCharacter(
+          id: id,
+          characterId: selectedDocument.id,
+          transform: AffineMatrix(
+            a: 0.92,
+            b: 0,
+            c: 0,
+            d: 0.92,
+            tx: -120 + index * 80,
+            ty: 0,
+          ),
+          pose: 'native',
+        ),
+      ),
+      messageText: 'Added native scene character $id.',
+    );
+  }
+
+  Future<void> _removeSelectedNativeSceneCharacter() async {
+    final editor = _nativeEditor;
+    final selected = editor?.selectedSceneCharacter;
+    if (editor == null || selected == null) {
+      return;
+    }
+    if (editor.scene.characters.length <= 1) {
+      setState(() {
+        _messageText = 'Keep at least one native scene character.';
+        _messageIsError = true;
+      });
+      return;
+    }
+    await _applyNativeEditor(
+      editor.removeSceneCharacter(selected.id),
+      messageText: 'Removed native scene character ${selected.id}.',
+    );
+  }
+
+  Future<void> _attachRegisteredNativeAssetSlot() async {
+    final editor = _nativeEditor;
+    if (editor == null) {
+      return;
+    }
+    const asset = ReactifyRegisteredAsset(
+      id: 'user.asset.sample.svg',
+      kind: ReactifyAssetKind.svg,
+      uri: 'assets/gacha/head/head_1.svg',
+      source: 'user',
+      dimensions: Size(600, 600),
+      metadata: {'label': 'Sample SVG', 'source': 'editor_sample'},
+    );
+    await _applyNativeEditor(
+      editor
+          .registerAsset(asset)
+          .attachRegisteredAssetSlotToSelectedCharacter(
+            assetId: asset.id,
+            name: 'Registered SVG',
+            localTransform: const AffineMatrix(
+              a: 0.18,
+              b: 0,
+              c: 0,
+              d: 0.18,
+              tx: 72,
+              ty: -48,
+            ),
+          ),
+      messageText: 'Attached registered native asset ${asset.id}.',
+    );
+  }
+
+  String _nextSceneCharacterId(
+    ReactifySceneEditingState editor,
+    String baseId,
+  ) {
+    final existingIds = {
+      for (final character in editor.scene.characters) character.id,
+    };
+    if (!existingIds.contains(baseId)) {
+      return baseId;
+    }
+    var index = 2;
+    while (existingIds.contains('$baseId.$index')) {
+      index += 1;
+    }
+    return '$baseId.$index';
+  }
+
   Future<void> _updateSelectedNativeTransform(AffineMatrix transform) async {
     final editor = _nativeEditor;
     if (editor == null) {
@@ -1319,6 +1440,9 @@ class _NativeSceneControls extends StatelessWidget {
     required this.onCharacterSelected,
     required this.onTransformChanged,
     required this.onHairOverrideChanged,
+    required this.onCharacterAdded,
+    required this.onCharacterRemoved,
+    required this.onRegisteredAssetAttached,
   });
 
   final ReactifySceneEditingState editor;
@@ -1326,6 +1450,9 @@ class _NativeSceneControls extends StatelessWidget {
   final ValueChanged<String> onCharacterSelected;
   final ValueChanged<AffineMatrix> onTransformChanged;
   final ValueChanged<bool> onHairOverrideChanged;
+  final VoidCallback onCharacterAdded;
+  final VoidCallback onCharacterRemoved;
+  final VoidCallback onRegisteredAssetAttached;
 
   @override
   Widget build(BuildContext context) {
@@ -1433,6 +1560,34 @@ class _NativeSceneControls extends StatelessWidget {
             value: hideNativeHair,
             onChanged: onHairOverrideChanged,
           ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton(
+                onPressed: onCharacterAdded,
+                child: const Text('Add Character'),
+              ),
+              OutlinedButton(
+                onPressed: editor.scene.characters.length <= 1
+                    ? null
+                    : onCharacterRemoved,
+                child: const Text('Remove Selected'),
+              ),
+              OutlinedButton(
+                onPressed: onRegisteredAssetAttached,
+                child: const Text('Attach Registered Asset'),
+              ),
+            ],
+          ),
+          if (editor.assetRegistry.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              '${editor.assetRegistry.length} registered native asset(s)',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
         ],
       ),
     );
@@ -1513,6 +1668,9 @@ class _EditorInspector extends StatelessWidget {
     required this.onResetToFixturePressed,
     required this.onResetToBaselinePressed,
     required this.onNativeHairOverrideChanged,
+    required this.onNativeSceneCharacterAdded,
+    required this.onNativeSceneCharacterRemoved,
+    required this.onNativeRegisteredAssetAttached,
     required this.onNativeSceneCharacterSelected,
     required this.onNativeTransformChanged,
     required this.onNumericFieldChanged,
@@ -1545,6 +1703,9 @@ class _EditorInspector extends StatelessWidget {
   final VoidCallback onResetToFixturePressed;
   final VoidCallback onResetToBaselinePressed;
   final ValueChanged<bool> onNativeHairOverrideChanged;
+  final VoidCallback onNativeSceneCharacterAdded;
+  final VoidCallback onNativeSceneCharacterRemoved;
+  final VoidCallback onNativeRegisteredAssetAttached;
   final ValueChanged<String> onNativeSceneCharacterSelected;
   final ValueChanged<AffineMatrix> onNativeTransformChanged;
   final Future<void> Function(String field, int value) onNumericFieldChanged;
@@ -1636,6 +1797,9 @@ class _EditorInspector extends StatelessWidget {
                     onCharacterSelected: onNativeSceneCharacterSelected,
                     onTransformChanged: onNativeTransformChanged,
                     onHairOverrideChanged: onNativeHairOverrideChanged,
+                    onCharacterAdded: onNativeSceneCharacterAdded,
+                    onCharacterRemoved: onNativeSceneCharacterRemoved,
+                    onRegisteredAssetAttached: onNativeRegisteredAssetAttached,
                   ),
                 ],
                 const SizedBox(height: 12),

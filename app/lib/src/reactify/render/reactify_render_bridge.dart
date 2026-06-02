@@ -10,6 +10,8 @@ class ReactifyRenderBridge {
   const ReactifyRenderBridge({required this.assetStore});
 
   final GachaAssetStore assetStore;
+  static final Map<String, ReactifyDrawingPreparedAsset> _drawingAssetCache =
+      {};
 
   Future<ResolvedScene> buildRenderableScene(
     ReactifySceneDocument scene,
@@ -26,15 +28,19 @@ class ReactifyRenderBridge {
     final assets = await assetStore.loadAll(assetPaths);
     for (final entry in entries) {
       if (_isInlineDrawing(entry.asset)) {
-        assets[entry.asset.uri] = ReactifyDrawingPreparedAsset(
-          assetPath: entry.asset.uri,
-          strokes: _drawingStrokes(entry.slot.metadata),
-          strokeWidth: _metadataDouble(
-            entry.slot.metadata,
-            'drawingStrokeWidth',
-            fallback: 3.5,
+        final cacheKey = _drawingCacheKey(entry.asset, entry.slot.metadata);
+        assets[entry.asset.uri] = _drawingAssetCache.putIfAbsent(
+          cacheKey,
+          () => ReactifyDrawingPreparedAsset(
+            assetPath: entry.asset.uri,
+            strokes: _drawingStrokes(entry.slot.metadata),
+            strokeWidth: _metadataDouble(
+              entry.slot.metadata,
+              'drawingStrokeWidth',
+              fallback: 3.5,
+            ),
+            color: _metadataColor(entry.slot.metadata, 'drawingColor'),
           ),
-          color: _metadataColor(entry.slot.metadata, 'drawingColor'),
         );
       }
     }
@@ -70,6 +76,10 @@ class ReactifyRenderBridge {
     Map<String, ReactifyCharacterDocument> characters,
   ) {
     final entries = <ReactifyRenderableScenePart>[];
+    final sceneDepths = {
+      for (var index = 0; index < scene.characters.length; index++)
+        scene.characters[index].id: index * 1000000000000,
+    };
     for (final sceneCharacter in scene.characters) {
       final character = characters[sceneCharacter.characterId];
       if (character == null) {
@@ -103,11 +113,8 @@ class ReactifyRenderBridge {
               localTransform: flattened,
               targetJoint: 'torso',
               tintColor: basePart.tintColor,
-              globalDepth: _sceneDepth(
-                scene,
-                sceneCharacter,
-                basePart.globalDepth,
-              ),
+              globalDepth:
+                  (sceneDepths[sceneCharacter.id] ?? 0) + basePart.globalDepth,
             ),
           ),
         );
@@ -362,20 +369,21 @@ class ReactifyRenderBridge {
     return bounds;
   }
 
-  int _sceneDepth(
-    ReactifySceneDocument scene,
-    ReactifySceneCharacter sceneCharacter,
-    int partDepth,
-  ) {
-    final index = scene.characters.indexWhere(
-      (item) => item.id == sceneCharacter.id,
-    );
-    return (index < 0 ? 0 : index) * 1000000000000 + partDepth;
-  }
-
   static bool _isInlineDrawing(ReactifyAssetRef asset) {
     return asset.kind == ReactifyAssetKind.drawing ||
         asset.uri.startsWith('reactify://drawing/');
+  }
+
+  static String _drawingCacheKey(
+    ReactifyAssetRef asset,
+    Map<String, Object?> metadata,
+  ) {
+    return [
+      asset.uri,
+      metadata['drawingColor'] ?? '',
+      metadata['drawingStrokeWidth'] ?? '',
+      metadata['drawingStrokes'] ?? '',
+    ].join('|');
   }
 
   static List<List<Offset>> _drawingStrokes(Map<String, Object?> metadata) {

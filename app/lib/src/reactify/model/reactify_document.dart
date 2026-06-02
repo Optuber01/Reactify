@@ -547,6 +547,28 @@ class ReactifySceneCharacter {
       'metadata': metadata,
     };
   }
+
+  ReactifySceneCharacter copyWith({
+    String? id,
+    String? characterId,
+    AffineMatrix? transform,
+    Map<String, ReactifySlotOverride>? slotOverrides,
+    String? expression,
+    String? pose,
+    String? dialogue,
+    Map<String, Object?>? metadata,
+  }) {
+    return ReactifySceneCharacter(
+      id: id ?? this.id,
+      characterId: characterId ?? this.characterId,
+      transform: transform ?? this.transform,
+      slotOverrides: slotOverrides ?? this.slotOverrides,
+      expression: expression ?? this.expression,
+      pose: pose ?? this.pose,
+      dialogue: dialogue ?? this.dialogue,
+      metadata: metadata ?? this.metadata,
+    );
+  }
 }
 
 class ReactifySceneDocument {
@@ -643,6 +665,169 @@ class ReactifySceneDocument {
       'cameraTransform': cameraTransform.toDebugJson(),
       'characters': [for (final character in characters) character.toJson()],
       'metadata': metadata,
+    };
+  }
+}
+
+class ReactifySceneEditingState {
+  const ReactifySceneEditingState({
+    required this.scene,
+    required this.characters,
+    required this.selectedSceneCharacterId,
+  });
+
+  final ReactifySceneDocument scene;
+  final Map<String, ReactifyCharacterDocument> characters;
+  final String selectedSceneCharacterId;
+
+  ReactifySceneCharacter? get selectedSceneCharacter {
+    for (final character in scene.characters) {
+      if (character.id == selectedSceneCharacterId) {
+        return character;
+      }
+    }
+    return scene.characters.isEmpty ? null : scene.characters.first;
+  }
+
+  ReactifyCharacterDocument? get selectedCharacterDocument {
+    final selected = selectedSceneCharacter;
+    return selected == null ? null : characters[selected.characterId];
+  }
+
+  factory ReactifySceneEditingState.fromJson(Map<String, Object?> json) {
+    final scene = ReactifySceneDocument.fromJson(_asMap(json['scene']));
+    final parsedCharacters = <String, ReactifyCharacterDocument>{};
+    for (final entry in _list(json, 'characters')) {
+      final character = ReactifyCharacterDocument.fromJson(_asMap(entry));
+      parsedCharacters[character.id] = character;
+    }
+    final selectedId = _string(
+      json,
+      'selectedSceneCharacterId',
+      fallback: scene.characters.isEmpty ? '' : scene.characters.first.id,
+    );
+    return ReactifySceneEditingState(
+      scene: scene,
+      characters: parsedCharacters,
+      selectedSceneCharacterId:
+          scene.characters.any((character) => character.id == selectedId)
+          ? selectedId
+          : (scene.characters.isEmpty ? '' : scene.characters.first.id),
+    );
+  }
+
+  ReactifySceneEditingState copyWith({
+    ReactifySceneDocument? scene,
+    Map<String, ReactifyCharacterDocument>? characters,
+    String? selectedSceneCharacterId,
+  }) {
+    final nextScene = scene ?? this.scene;
+    final requestedSelection =
+        selectedSceneCharacterId ?? this.selectedSceneCharacterId;
+    final nextSelection =
+        nextScene.characters.any(
+          (character) => character.id == requestedSelection,
+        )
+        ? requestedSelection
+        : (nextScene.characters.isEmpty ? '' : nextScene.characters.first.id);
+    return ReactifySceneEditingState(
+      scene: nextScene,
+      characters: characters ?? this.characters,
+      selectedSceneCharacterId: nextSelection,
+    );
+  }
+
+  ReactifySceneEditingState selectSceneCharacter(String sceneCharacterId) {
+    return copyWith(selectedSceneCharacterId: sceneCharacterId);
+  }
+
+  ReactifySceneEditingState updateSelectedCharacterTransform(
+    AffineMatrix transform,
+  ) {
+    return _replaceSelectedSceneCharacter(
+      (character) => character.copyWith(transform: transform),
+    );
+  }
+
+  ReactifySceneEditingState toggleSelectedSemanticSlotOverride({
+    required String family,
+    required bool hidden,
+  }) {
+    final character = selectedCharacterDocument;
+    ReactifySlot? semanticSlot;
+    if (character != null) {
+      for (final slot in character.semanticSlots) {
+        if (slot.family == family) {
+          semanticSlot = slot;
+          break;
+        }
+      }
+    }
+    if (semanticSlot == null) {
+      return this;
+    }
+    return updateSelectedSlotOverride(
+      semanticSlot.id,
+      hidden ? const ReactifySlotOverride(visible: false) : null,
+    );
+  }
+
+  ReactifySceneEditingState updateSelectedSlotOverride(
+    String slotId,
+    ReactifySlotOverride? override,
+  ) {
+    return _replaceSelectedSceneCharacter((character) {
+      final overrides = {...character.slotOverrides};
+      if (override == null) {
+        overrides.remove(slotId);
+      } else {
+        overrides[slotId] = override;
+      }
+      return character.copyWith(slotOverrides: overrides);
+    });
+  }
+
+  ReactifySceneEditingState addCustomSlotToSelectedCharacter(
+    ReactifySlot slot,
+  ) {
+    final character = selectedCharacterDocument;
+    if (selectedSceneCharacter == null || character == null) {
+      return this;
+    }
+    final nextCharacters = {...characters};
+    nextCharacters[character.id] = character.addSlot(slot);
+    return copyWith(characters: nextCharacters);
+  }
+
+  ReactifySceneEditingState _replaceSelectedSceneCharacter(
+    ReactifySceneCharacter Function(ReactifySceneCharacter character) replace,
+  ) {
+    var found = false;
+    final nextCharacters = <ReactifySceneCharacter>[];
+    for (final character in scene.characters) {
+      if (character.id == selectedSceneCharacterId) {
+        found = true;
+        nextCharacters.add(replace(character));
+      } else {
+        nextCharacters.add(character);
+      }
+    }
+    if (!found) {
+      return this;
+    }
+    return copyWith(scene: scene.copyWith(characters: nextCharacters));
+  }
+
+  Map<String, Object?> toJson() {
+    final sortedCharacters = characters.values.toList()
+      ..sort((left, right) => left.id.compareTo(right.id));
+    return {
+      'schemaVersion': reactifySceneDocumentVersion,
+      'selectedSceneCharacterId': selectedSceneCharacterId,
+      'scene': scene.toJson(),
+      'characters': [
+        for (final character in sortedCharacters) character.toJson(),
+      ],
     };
   }
 }

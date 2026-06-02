@@ -97,9 +97,7 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
   GachaCharacterState? _baselineState;
   GachaCharacterState? _currentState;
   ReactifyCharacterDocument? _reactifyCharacter;
-  ReactifySceneDocument? _reactifyScene;
-  Map<String, ReactifyCharacterDocument> _reactifyCharacters = const {};
-  final List<ReactifySlot> _customSlots = [];
+  ReactifySceneEditingState? _nativeEditor;
   int _reactifyResolvedPartCount = 0;
   ResolvedScene? _scene;
   bool _sceneLoading = false;
@@ -123,10 +121,10 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
   }
 
   void _handleStrokesDrawn(List<Offset> stroke) {
-    final currentState = _currentState;
-    final character = _reactifyCharacter;
-    final scene = _reactifyScene;
-    if (currentState == null || character == null || scene == null) {
+    final editor = _nativeEditor;
+    final character = editor?.selectedCharacterDocument;
+    final sceneCharacter = editor?.selectedSceneCharacter;
+    if (editor == null || character == null || sceneCharacter == null) {
       setState(() {
         _messageText =
             'Captured stroke with ${stroke.length} points, but no native scene is loaded.';
@@ -134,11 +132,9 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
       });
       return;
     }
-    final slot = _customDrawingSlotForStroke(stroke, character, scene);
-    _customSlots.add(slot);
-    _setCurrentState(
-      currentState,
-      selectedField: _selectedField,
+    final slot = _customDrawingSlotForStroke(stroke, character, sceneCharacter);
+    _applyNativeEditor(
+      editor.addCustomSlotToSelectedCharacter(slot),
       messageText:
           'Added a native vector drawing slot with ${stroke.length} points.',
     );
@@ -147,12 +143,8 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
   ReactifySlot _customDrawingSlotForStroke(
     List<Offset> screenStroke,
     ReactifyCharacterDocument character,
-    ReactifySceneDocument scene,
+    ReactifySceneCharacter sceneCharacter,
   ) {
-    final sceneCharacter = scene.characters.firstWhere(
-      (item) => item.characterId == character.id,
-      orElse: () => scene.characters.first,
-    );
     final anchorWorld = _anchorWorldTransforms(character.rig);
     final headWorld =
         anchorWorld['head'] ??
@@ -172,6 +164,9 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
         {'x': point.dx - bounds.left, 'y': point.dy - bounds.top},
     ];
     final slotId = 'custom.drawing.${DateTime.now().microsecondsSinceEpoch}';
+    final customSlotCount = character.slots
+        .where((slot) => slot.kind == ReactifySlotKind.custom)
+        .length;
     return ReactifySlot(
       id: slotId,
       kind: ReactifySlotKind.custom,
@@ -179,7 +174,7 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
       name: 'Drawing',
       anchorId: 'head',
       localTransform: AffineMatrix.translation(bounds.left, bounds.top),
-      depth: 900000000 + _customSlots.length,
+      depth: 900000000 + customSlotCount,
       visible: true,
       asset: ReactifyAssetRef(
         id: '$slotId.asset',
@@ -331,6 +326,7 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
                       currentState: currentState,
                       baselineState: baselineState,
                       scene: scene,
+                      nativeEditor: _nativeEditor,
                       schema: widget.tables.schema,
                       tables: widget.tables,
                       colorDrafts: _colorDrafts,
@@ -340,9 +336,17 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
                       onExportPressed: _exportCurrentState,
                       onExportNativeSvgPressed: _exportNativeSvg,
                       onExportNativePngPressed: _exportNativePng,
+                      onExportNativeJsonPressed: _exportNativeJson,
+                      onImportNativeJsonPressed: _importNativeJson,
                       onResetToFixturePressed: _resetToSelectedFixture,
                       onResetToBaselinePressed: _resetToBaseline,
                       onNativeHairOverrideChanged: _toggleNativeHairOverride,
+                      onNativeSceneCharacterSelected: (sceneCharacterId) {
+                        _selectNativeSceneCharacter(sceneCharacterId);
+                      },
+                      onNativeTransformChanged: (transform) {
+                        _updateSelectedNativeTransform(transform);
+                      },
                       onNumericFieldChanged: _updateNumericField,
                       onColorDraftChanged: _updateColorDraft,
                       onColorCommit: _commitColorField,
@@ -398,7 +402,6 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
       final state = _parser.parse(normalized);
       _codeController.text = normalized;
       _colorDrafts.clear();
-      _customSlots.clear();
       await _setCurrentState(
         state,
         baselineState: state,
@@ -439,14 +442,14 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
   }
 
   Future<void> _exportNativeSvg() async {
-    final scene = _reactifyScene;
-    if (scene == null || _reactifyCharacters.isEmpty) {
+    final editor = _nativeEditor;
+    if (editor == null || editor.characters.isEmpty) {
       return;
     }
     try {
       final package = await ReactifySvgExporter().exportPackage(
-        scene,
-        _reactifyCharacters,
+        editor.scene,
+        editor.characters,
       );
       _codeController.text = package.svg;
       setState(() {
@@ -463,14 +466,14 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
   }
 
   Future<void> _exportNativePng() async {
-    final scene = _reactifyScene;
-    if (scene == null || _reactifyCharacters.isEmpty) {
+    final editor = _nativeEditor;
+    if (editor == null || editor.characters.isEmpty) {
       return;
     }
     try {
       final bytes = await ReactifyPngExporter(
         bridge: _reactifyBridge,
-      ).exportScene(scene, _reactifyCharacters);
+      ).exportScene(editor.scene, editor.characters);
       _codeController.text = 'data:image/png;base64,${base64Encode(bytes)}';
       setState(() {
         _messageText = 'Exported native PNG data URI to the editor buffer.';
@@ -484,17 +487,53 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
     }
   }
 
-  Future<void> _toggleNativeHairOverride(bool value) async {
-    final currentState = _currentState;
-    if (currentState == null || _hideNativeHair == value) {
+  void _exportNativeJson() {
+    final editor = _nativeEditor;
+    if (editor == null) {
       return;
     }
+    _codeController.text = const JsonEncoder.withIndent(
+      '  ',
+    ).convert(editor.toJson());
     setState(() {
-      _hideNativeHair = value;
+      _messageText = 'Exported native scene JSON to the editor buffer.';
+      _messageIsError = false;
     });
-    await _setCurrentState(
-      currentState,
-      selectedField: _selectedField,
+  }
+
+  Future<void> _importNativeJson() async {
+    try {
+      final decoded = jsonDecode(_codeController.text.trim());
+      if (decoded is! Map) {
+        throw const FormatException('Native scene JSON must be an object.');
+      }
+      final editor = ReactifySceneEditingState.fromJson(
+        Map<String, Object?>.from(decoded),
+      );
+      await _applyNativeEditor(
+        editor,
+        messageText: 'Imported native scene JSON from the editor buffer.',
+      );
+    } on FormatException catch (error) {
+      setState(() {
+        _messageText = error.message;
+        _messageIsError = true;
+      });
+    } catch (error) {
+      setState(() {
+        _messageText = 'Failed to import native scene JSON: $error';
+        _messageIsError = true;
+      });
+    }
+  }
+
+  Future<void> _toggleNativeHairOverride(bool value) async {
+    final editor = _nativeEditor;
+    if (editor == null || _hideNativeHair == value) {
+      return;
+    }
+    await _applyNativeEditor(
+      editor.toggleSelectedSemanticSlotOverride(family: 'hair', hidden: value),
       messageText: value
           ? 'Applied a native semantic hair-slot override.'
           : 'Removed the native semantic hair-slot override.',
@@ -627,23 +666,26 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
       }
     });
     try {
-      final bundle = _buildReactifySceneBundle(next);
+      final editor = _buildNativeEditorForState(
+        next,
+        resetScene: baselineState != null,
+      );
       final scene = await _reactifyBridge.buildRenderableScene(
-        bundle.scene,
-        bundle.characters,
+        editor.scene,
+        editor.characters,
       );
       final reactifyResolvedPartCount = _reactifyBridge
-          .resolveSceneParts(bundle.scene, bundle.characters)
+          .resolveSceneParts(editor.scene, editor.characters)
           .length;
       if (!mounted || serial != _renderSerial) {
         return;
       }
       setState(() {
         _scene = scene;
-        _reactifyCharacter = bundle.currentCharacter;
-        _reactifyScene = bundle.scene;
-        _reactifyCharacters = bundle.characters;
+        _nativeEditor = editor;
+        _reactifyCharacter = editor.selectedCharacterDocument;
         _reactifyResolvedPartCount = reactifyResolvedPartCount;
+        _hideNativeHair = _selectedHairOverrideHidden(editor);
         _sceneLoading = false;
       });
       _game.updateFlatScene(scene);
@@ -660,112 +702,200 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
     }
   }
 
-  _ReactifyEditorSceneBundle _buildReactifySceneBundle(
-    GachaCharacterState currentState,
-  ) {
+  Future<void> _applyNativeEditor(
+    ReactifySceneEditingState editor, {
+    String? messageText,
+  }) async {
+    final serial = ++_renderSerial;
+    final previousScene = _scene;
+    setState(() {
+      _sceneLoading = true;
+      if (messageText != null) {
+        _messageText = messageText;
+        _messageIsError = false;
+      }
+    });
+    try {
+      final scene = await _reactifyBridge.buildRenderableScene(
+        editor.scene,
+        editor.characters,
+      );
+      final reactifyResolvedPartCount = _reactifyBridge
+          .resolveSceneParts(editor.scene, editor.characters)
+          .length;
+      if (!mounted || serial != _renderSerial) {
+        return;
+      }
+      setState(() {
+        _scene = scene;
+        _nativeEditor = editor;
+        _reactifyCharacter = editor.selectedCharacterDocument;
+        _reactifyResolvedPartCount = reactifyResolvedPartCount;
+        _hideNativeHair = _selectedHairOverrideHidden(editor);
+        _sceneLoading = false;
+      });
+      _game.updateFlatScene(scene);
+    } catch (error) {
+      if (!mounted || serial != _renderSerial) {
+        return;
+      }
+      setState(() {
+        _scene = previousScene;
+        _sceneLoading = false;
+        _messageText = 'Failed to rebuild the native scene: $error';
+        _messageIsError = true;
+      });
+    }
+  }
+
+  ReactifySceneEditingState _buildNativeEditorForState(
+    GachaCharacterState currentState, {
+    required bool resetScene,
+  }) {
     var currentCharacter = _reactifyAdapter.migrate(
       currentState,
       id: 'char.current',
     );
-    for (final slot in _customSlots) {
+    final existing = resetScene ? null : _nativeEditor;
+    final previousCurrent = existing?.characters[currentCharacter.id];
+    for (final slot in previousCurrent?.slots ?? const <ReactifySlot>[]) {
+      if (slot.kind != ReactifySlotKind.custom) {
+        continue;
+      }
       currentCharacter = currentCharacter.addSlot(slot);
     }
+    if (existing == null) {
+      final partnerCharacter = currentCharacter.copyWith(
+        id: 'char.partner',
+        name: 'Partner',
+      );
+      return ReactifySceneEditingState(
+        selectedSceneCharacterId: 'scene_char.current',
+        scene: const ReactifySceneDocument(
+          id: 'scene.current',
+          name: 'Current Native Scene',
+          characters: [
+            ReactifySceneCharacter(
+              id: 'scene_char.current',
+              characterId: 'char.current',
+              transform: AffineMatrix(
+                a: 0.92,
+                b: 0,
+                c: 0,
+                d: 0.92,
+                tx: -180,
+                ty: 0,
+              ),
+              pose: 'current',
+            ),
+            ReactifySceneCharacter(
+              id: 'scene_char.partner',
+              characterId: 'char.partner',
+              transform: AffineMatrix(
+                a: 0.92,
+                b: 0,
+                c: 0,
+                d: 0.92,
+                tx: 180,
+                ty: 0,
+              ),
+              pose: 'partner',
+            ),
+          ],
+        ),
+        characters: {
+          currentCharacter.id: currentCharacter,
+          partnerCharacter.id: partnerCharacter,
+        },
+      );
+    }
     final characters = <String, ReactifyCharacterDocument>{
+      ...existing.characters,
       currentCharacter.id: currentCharacter,
     };
-    final sceneCharacters = <ReactifySceneCharacter>[];
-    final baselineState = _baselineState;
-    final isComparison =
-        baselineState != null &&
-        baselineState.serializeCode() != currentState.serializeCode();
-    if (isComparison) {
-      final baselineCharacter = _reactifyAdapter.migrate(
-        baselineState,
-        id: 'char.baseline',
-      );
-      characters[baselineCharacter.id] = baselineCharacter;
-      sceneCharacters.add(
+    characters.putIfAbsent(
+      'char.partner',
+      () => currentCharacter.copyWith(id: 'char.partner', name: 'Partner'),
+    );
+    final sceneCharacters = [...existing.scene.characters];
+    if (!sceneCharacters.any(
+      (character) => character.id == 'scene_char.current',
+    )) {
+      sceneCharacters.insert(
+        0,
         const ReactifySceneCharacter(
-          id: 'scene_char.baseline',
-          characterId: 'char.baseline',
+          id: 'scene_char.current',
+          characterId: 'char.current',
           transform: AffineMatrix(
             a: 0.92,
             b: 0,
             c: 0,
             d: 0.92,
-            tx: -260,
-            ty: 0,
-          ),
-          pose: 'baseline',
-        ),
-      );
-      sceneCharacters.add(
-        ReactifySceneCharacter(
-          id: 'scene_char.current',
-          characterId: 'char.current',
-          transform: const AffineMatrix(
-            a: 0.92,
-            b: 0,
-            c: 0,
-            d: 0.92,
-            tx: 260,
+            tx: -180,
             ty: 0,
           ),
           pose: 'current',
-          slotOverrides: _nativeSlotOverrides(currentCharacter),
-        ),
-      );
-    } else {
-      sceneCharacters.add(
-        ReactifySceneCharacter(
-          id: 'scene_char.current',
-          characterId: 'char.current',
-          transform: const AffineMatrix.identity(),
-          pose: 'current',
-          slotOverrides: _nativeSlotOverrides(currentCharacter),
         ),
       );
     }
-    return _ReactifyEditorSceneBundle(
-      currentCharacter: currentCharacter,
-      scene: ReactifySceneDocument(
-        id: 'scene.current',
-        name: 'Current Native Scene',
-        characters: sceneCharacters,
-      ),
+    if (!sceneCharacters.any(
+      (character) => character.id == 'scene_char.partner',
+    )) {
+      sceneCharacters.add(
+        const ReactifySceneCharacter(
+          id: 'scene_char.partner',
+          characterId: 'char.partner',
+          transform: AffineMatrix(a: 0.92, b: 0, c: 0, d: 0.92, tx: 180, ty: 0),
+          pose: 'partner',
+        ),
+      );
+    }
+    return existing.copyWith(
+      scene: existing.scene.copyWith(characters: sceneCharacters),
       characters: characters,
     );
   }
 
-  Map<String, ReactifySlotOverride> _nativeSlotOverrides(
-    ReactifyCharacterDocument character,
-  ) {
-    if (!_hideNativeHair) {
-      return const {};
+  bool _selectedHairOverrideHidden(ReactifySceneEditingState editor) {
+    final sceneCharacter = editor.selectedSceneCharacter;
+    final character = editor.selectedCharacterDocument;
+    if (sceneCharacter == null || character == null) {
+      return false;
     }
     for (final slot in character.semanticSlots) {
-      if (slot.family == 'hair') {
-        return {slot.id: const ReactifySlotOverride(visible: false)};
+      if (slot.family != 'hair') {
+        continue;
       }
+      return sceneCharacter.slotOverrides[slot.id]?.visible == false;
     }
-    return const {};
+    return false;
+  }
+
+  Future<void> _selectNativeSceneCharacter(String sceneCharacterId) async {
+    final editor = _nativeEditor;
+    if (editor == null) {
+      return;
+    }
+    await _applyNativeEditor(
+      editor.selectSceneCharacter(sceneCharacterId),
+      messageText: 'Selected native scene character $sceneCharacterId.',
+    );
+  }
+
+  Future<void> _updateSelectedNativeTransform(AffineMatrix transform) async {
+    final editor = _nativeEditor;
+    if (editor == null) {
+      return;
+    }
+    await _applyNativeEditor(
+      editor.updateSelectedCharacterTransform(transform),
+      messageText: 'Updated the selected native character transform.',
+    );
   }
 
   ValidationCaseDescriptor _fixtureDescriptorFor(String id) {
     return widget.tables.editorFixtures.firstWhere((item) => item.id == id);
   }
-}
-
-class _ReactifyEditorSceneBundle {
-  const _ReactifyEditorSceneBundle({
-    required this.currentCharacter,
-    required this.scene,
-    required this.characters,
-  });
-
-  final ReactifyCharacterDocument currentCharacter;
-  final ReactifySceneDocument scene;
-  final Map<String, ReactifyCharacterDocument> characters;
 }
 
 class _HeaderBar extends StatelessWidget {
@@ -1182,6 +1312,181 @@ class _FixturePickerRow extends StatelessWidget {
   }
 }
 
+class _NativeSceneControls extends StatelessWidget {
+  const _NativeSceneControls({
+    required this.editor,
+    required this.hideNativeHair,
+    required this.onCharacterSelected,
+    required this.onTransformChanged,
+    required this.onHairOverrideChanged,
+  });
+
+  final ReactifySceneEditingState editor;
+  final bool hideNativeHair;
+  final ValueChanged<String> onCharacterSelected;
+  final ValueChanged<AffineMatrix> onTransformChanged;
+  final ValueChanged<bool> onHairOverrideChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final selected =
+        editor.selectedSceneCharacter ??
+        (editor.scene.characters.isEmpty
+            ? null
+            : editor.scene.characters.first);
+    if (selected == null) {
+      return const SizedBox.shrink();
+    }
+    final transform = selected.transform;
+    return _PanelCard(
+      title: 'Native Scene',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          DropdownButtonFormField<String>(
+            initialValue: selected.id,
+            decoration: const InputDecoration(
+              labelText: 'Selected character',
+              border: OutlineInputBorder(),
+            ),
+            items: [
+              for (final sceneCharacter in editor.scene.characters)
+                DropdownMenuItem(
+                  value: sceneCharacter.id,
+                  child: Text(sceneCharacter.id),
+                ),
+            ],
+            onChanged: (value) {
+              if (value != null) {
+                onCharacterSelected(value);
+              }
+            },
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _NativeTransformField(
+                label: 'X',
+                value: transform.tx,
+                onSubmitted: (value) => onTransformChanged(
+                  AffineMatrix(
+                    a: transform.a,
+                    b: transform.b,
+                    c: transform.c,
+                    d: transform.d,
+                    tx: value,
+                    ty: transform.ty,
+                  ),
+                ),
+              ),
+              _NativeTransformField(
+                label: 'Y',
+                value: transform.ty,
+                onSubmitted: (value) => onTransformChanged(
+                  AffineMatrix(
+                    a: transform.a,
+                    b: transform.b,
+                    c: transform.c,
+                    d: transform.d,
+                    tx: transform.tx,
+                    ty: value,
+                  ),
+                ),
+              ),
+              _NativeTransformField(
+                label: 'Scale X',
+                value: transform.a,
+                onSubmitted: (value) => onTransformChanged(
+                  AffineMatrix(
+                    a: value,
+                    b: transform.b,
+                    c: transform.c,
+                    d: transform.d,
+                    tx: transform.tx,
+                    ty: transform.ty,
+                  ),
+                ),
+              ),
+              _NativeTransformField(
+                label: 'Scale Y',
+                value: transform.d,
+                onSubmitted: (value) => onTransformChanged(
+                  AffineMatrix(
+                    a: transform.a,
+                    b: transform.b,
+                    c: transform.c,
+                    d: value,
+                    tx: transform.tx,
+                    ty: transform.ty,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          SwitchListTile(
+            dense: true,
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Hide selected hair slot'),
+            value: hideNativeHair,
+            onChanged: onHairOverrideChanged,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NativeTransformField extends StatelessWidget {
+  const _NativeTransformField({
+    required this.label,
+    required this.value,
+    required this.onSubmitted,
+  });
+
+  final String label;
+  final double value;
+  final ValueChanged<double> onSubmitted;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 106,
+      child: TextFormField(
+        key: ValueKey('$label-$value'),
+        initialValue: _formatNumber(value),
+        keyboardType: const TextInputType.numberWithOptions(
+          signed: true,
+          decimal: true,
+        ),
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+          isDense: true,
+        ),
+        onFieldSubmitted: (raw) {
+          final parsed = double.tryParse(raw.trim());
+          if (parsed != null) {
+            onSubmitted(parsed);
+          }
+        },
+      ),
+    );
+  }
+}
+
+String _formatNumber(double value) {
+  if (value == value.roundToDouble()) {
+    return value.toInt().toString();
+  }
+  return value
+      .toStringAsFixed(4)
+      .replaceFirst(RegExp(r'0+$'), '')
+      .replaceFirst(RegExp(r'\.$'), '');
+}
+
 class _EditorInspector extends StatelessWidget {
   const _EditorInspector({
     required this.baselineLabel,
@@ -1193,6 +1498,7 @@ class _EditorInspector extends StatelessWidget {
     required this.currentState,
     required this.baselineState,
     required this.scene,
+    required this.nativeEditor,
     required this.schema,
     required this.tables,
     required this.colorDrafts,
@@ -1202,9 +1508,13 @@ class _EditorInspector extends StatelessWidget {
     required this.onExportPressed,
     required this.onExportNativeSvgPressed,
     required this.onExportNativePngPressed,
+    required this.onExportNativeJsonPressed,
+    required this.onImportNativeJsonPressed,
     required this.onResetToFixturePressed,
     required this.onResetToBaselinePressed,
     required this.onNativeHairOverrideChanged,
+    required this.onNativeSceneCharacterSelected,
+    required this.onNativeTransformChanged,
     required this.onNumericFieldChanged,
     required this.onColorDraftChanged,
     required this.onColorCommit,
@@ -1220,6 +1530,7 @@ class _EditorInspector extends StatelessWidget {
   final GachaCharacterState currentState;
   final GachaCharacterState baselineState;
   final ResolvedScene scene;
+  final ReactifySceneEditingState? nativeEditor;
   final GachaFieldSchema schema;
   final ResolverTables tables;
   final Map<String, String> colorDrafts;
@@ -1229,9 +1540,13 @@ class _EditorInspector extends StatelessWidget {
   final VoidCallback onExportPressed;
   final VoidCallback onExportNativeSvgPressed;
   final VoidCallback onExportNativePngPressed;
+  final VoidCallback onExportNativeJsonPressed;
+  final VoidCallback onImportNativeJsonPressed;
   final VoidCallback onResetToFixturePressed;
   final VoidCallback onResetToBaselinePressed;
   final ValueChanged<bool> onNativeHairOverrideChanged;
+  final ValueChanged<String> onNativeSceneCharacterSelected;
+  final ValueChanged<AffineMatrix> onNativeTransformChanged;
   final Future<void> Function(String field, int value) onNumericFieldChanged;
   final void Function(String field, String value) onColorDraftChanged;
   final Future<void> Function(String field) onColorCommit;
@@ -1296,6 +1611,14 @@ class _EditorInspector extends StatelessWidget {
                       child: const Text('Export Native PNG'),
                     ),
                     OutlinedButton(
+                      onPressed: onExportNativeJsonPressed,
+                      child: const Text('Export Native JSON'),
+                    ),
+                    OutlinedButton(
+                      onPressed: onImportNativeJsonPressed,
+                      child: const Text('Import Native JSON'),
+                    ),
+                    OutlinedButton(
                       onPressed: onResetToFixturePressed,
                       child: const Text('Reset To Selected Fixture'),
                     ),
@@ -1305,14 +1628,16 @@ class _EditorInspector extends StatelessWidget {
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
-                SwitchListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Hide native hair slot'),
-                  value: hideNativeHair,
-                  onChanged: onNativeHairOverrideChanged,
-                ),
+                if (nativeEditor != null) ...[
+                  const SizedBox(height: 12),
+                  _NativeSceneControls(
+                    editor: nativeEditor!,
+                    hideNativeHair: hideNativeHair,
+                    onCharacterSelected: onNativeSceneCharacterSelected,
+                    onTransformChanged: onNativeTransformChanged,
+                    onHairOverrideChanged: onNativeHairOverrideChanged,
+                  ),
+                ],
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 16,

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ui' as ui;
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -482,6 +483,181 @@ void main() {
     },
   );
 
+  test(
+    'scene editor persists multi-character selection overrides and drawings',
+    () async {
+      final baseCharacter = _editableTestCharacter('char.left');
+      final rightCharacter = _editableTestCharacter('char.right');
+      final editor = ReactifySceneEditingState(
+        selectedSceneCharacterId: 'scene_char.left',
+        characters: {
+          baseCharacter.id: baseCharacter,
+          rightCharacter.id: rightCharacter,
+        },
+        scene: const ReactifySceneDocument(
+          id: 'scene.editing',
+          name: 'Editing',
+          characters: [
+            ReactifySceneCharacter(
+              id: 'scene_char.left',
+              characterId: 'char.left',
+              transform: AffineMatrix.identity(),
+            ),
+            ReactifySceneCharacter(
+              id: 'scene_char.right',
+              characterId: 'char.right',
+              transform: AffineMatrix(a: 1, b: 0, c: 0, d: 1, tx: 160, ty: 0),
+            ),
+          ],
+        ),
+      );
+      const drawing = ReactifySlot(
+        id: 'custom.drawing.persisted',
+        kind: ReactifySlotKind.custom,
+        family: 'custom',
+        name: 'Persisted Drawing',
+        anchorId: 'head',
+        localTransform: AffineMatrix(a: 1, b: 0, c: 0, d: 1, tx: 8, ty: 9),
+        depth: 10,
+        visible: true,
+        asset: ReactifyAssetRef(
+          id: 'custom.drawing.persisted.asset',
+          kind: ReactifyAssetKind.drawing,
+          uri: 'reactify://drawing/custom.drawing.persisted',
+          source: 'user',
+        ),
+        metadata: {
+          'source': 'user_drawing',
+          'drawingColor': '#00F5FF',
+          'drawingStrokeWidth': 4.0,
+          'drawingStrokes': [
+            [
+              {'x': 1.0, 'y': 2.0},
+              {'x': 5.0, 'y': 8.0},
+            ],
+          ],
+        },
+      );
+
+      final edited = editor
+          .selectSceneCharacter('scene_char.right')
+          .updateSelectedCharacterTransform(
+            const AffineMatrix(a: 1, b: 0, c: 0, d: 1, tx: 42, ty: 24),
+          )
+          .toggleSelectedSemanticSlotOverride(family: 'hair', hidden: true)
+          .addCustomSlotToSelectedCharacter(drawing);
+      final reparsed = ReactifySceneEditingState.fromJson(
+        Map<String, Object?>.from(jsonDecode(jsonEncode(edited.toJson()))),
+      );
+      final rightScene = reparsed.scene.characters.firstWhere(
+        (character) => character.id == 'scene_char.right',
+      );
+      final leftScene = reparsed.scene.characters.firstWhere(
+        (character) => character.id == 'scene_char.left',
+      );
+      final rightDocument = reparsed.characters['char.right']!;
+
+      expect(reparsed.toJson(), edited.toJson());
+      expect(reparsed.scene.characters, hasLength(2));
+      expect(reparsed.selectedSceneCharacterId, 'scene_char.right');
+      expect(rightScene.transform.tx, 42);
+      expect(rightScene.transform.ty, 24);
+      expect(leftScene.transform.tx, 0);
+      expect(leftScene.slotOverrides, isEmpty);
+      expect(rightScene.slotOverrides['semantic.hair']?.visible, isFalse);
+      expect(
+        rightDocument.slots.map((slot) => slot.id),
+        contains('custom.drawing.persisted'),
+      );
+      expect(
+        rightDocument.slots
+            .firstWhere((slot) => slot.id == 'custom.drawing.persisted')
+            .metadata['drawingStrokes'],
+        drawing.metadata['drawingStrokes'],
+      );
+    },
+  );
+
+  test(
+    'native preview svg and png exports share scene transform semantics',
+    () async {
+      final character = _transformEquivalenceCharacter();
+      const scene = ReactifySceneDocument(
+        id: 'scene.export.transforms',
+        name: 'Export Transforms',
+        canvasSize: Size(160, 140),
+        cameraTransform: AffineMatrix(a: 1, b: 0, c: 0, d: 1, tx: 5, ty: 7),
+        characters: [
+          ReactifySceneCharacter(
+            id: 'scene_char.export',
+            characterId: 'char.export',
+            transform: AffineMatrix(a: 1, b: 0, c: 0, d: 1, tx: 20, ty: 30),
+          ),
+        ],
+      );
+      final characters = {character.id: character};
+      final bridge = ReactifyRenderBridge(assetStore: GachaAssetStore());
+      final previewPart = bridge
+          .resolveRenderableSceneParts(scene, characters)
+          .single
+          .part;
+      final resolved = await bridge.buildRenderableScene(scene, characters);
+      final image = await ReactifyPngExporter.renderResolvedScene(
+        resolved,
+        scene.canvasSize,
+      );
+      final rawPixels = await image.toByteData(
+        format: ui.ImageByteFormat.rawRgba,
+      );
+      image.dispose();
+      final svg = await ReactifySvgExporter().exportPackage(scene, characters);
+      final pngBytes = await ReactifyPngExporter(
+        bridge: bridge,
+      ).exportScene(scene, characters);
+
+      expect(previewPart.localTransform.tx, 75);
+      expect(previewPart.localTransform.ty, 102);
+      expect(svg.svg, contains('transform="matrix(1 0 0 1 5 7)"'));
+      expect(svg.svg, contains('transform="matrix(1 0 0 1 20 30)"'));
+      expect(svg.svg, contains('transform="matrix(1 0 0 1 50 65)"'));
+      expect(rawPixels, isNotNull);
+      final pixels = rawPixels!;
+      expect(
+        _hasPaintedPixel(
+          pixels,
+          scene.canvasSize.width.toInt(),
+          left: 75,
+          top: 102,
+          right: 92,
+          bottom: 116,
+        ),
+        isTrue,
+      );
+      expect(
+        _hasPaintedPixel(
+          pixels,
+          scene.canvasSize.width.toInt(),
+          left: 10,
+          top: 15,
+          right: 30,
+          bottom: 35,
+        ),
+        isFalse,
+      );
+      expect(pngBytes.take(8).toList(), [137, 80, 78, 71, 13, 10, 26, 10]);
+    },
+  );
+
+  test('native editing does not regress Gacha 445 import export', () async {
+    final code = await rootBundle.loadString('fixtures/default_boy.gc.txt');
+    final state = parser.parse(code);
+    final exported = state.serializeCode();
+    final reparsed = parser.parse(exported);
+
+    expect(exported.split('|'), hasLength(445));
+    expect(reparsed.rawFields, orderedEquals(state.rawFields));
+  });
+
   test('exports native drawing slots as editable SVG and PNG', () async {
     const drawingSlot = ReactifySlot(
       id: 'custom.drawing.test',
@@ -542,4 +718,127 @@ void main() {
     expect(svgPackage.assets.single.inlined, isTrue);
     expect(pngBytes.take(8).toList(), [137, 80, 78, 71, 13, 10, 26, 10]);
   });
+}
+
+ReactifyCharacterDocument _editableTestCharacter(String id) {
+  return ReactifyCharacterDocument(
+    id: id,
+    name: id,
+    rig: const ReactifyRigTemplate(
+      id: 'editable_rig',
+      name: 'Editable Rig',
+      anchors: {
+        'torso': ReactifyAnchor(
+          id: 'torso',
+          localTransform: AffineMatrix.identity(),
+        ),
+        'head': ReactifyAnchor(
+          id: 'head',
+          parentId: 'torso',
+          localTransform: AffineMatrix.identity(),
+        ),
+      },
+    ),
+    slots: const [
+      ReactifySlot(
+        id: 'semantic.hair',
+        kind: ReactifySlotKind.semantic,
+        family: 'hair',
+        name: 'Hair',
+        anchorId: 'head',
+        localTransform: AffineMatrix.identity(),
+        depth: 0,
+        visible: true,
+        childSlotIds: ['hair.front'],
+      ),
+      ReactifySlot(
+        id: 'hair.front',
+        kind: ReactifySlotKind.renderLeaf,
+        family: 'hair',
+        name: 'Front Hair',
+        anchorId: 'head',
+        localTransform: AffineMatrix.identity(),
+        depth: 1,
+        visible: true,
+        asset: ReactifyAssetRef(
+          id: 'hair.front.asset',
+          kind: ReactifyAssetKind.drawing,
+          uri: 'reactify://drawing/hair.front',
+        ),
+        metadata: {
+          'drawingColor': '#112233',
+          'drawingStrokeWidth': 2.0,
+          'drawingStrokes': [
+            [
+              {'x': 0.0, 'y': 0.0},
+              {'x': 10.0, 'y': 0.0},
+            ],
+          ],
+        },
+      ),
+    ],
+  );
+}
+
+bool _hasPaintedPixel(
+  ByteData pixels,
+  int width, {
+  required int left,
+  required int top,
+  required int right,
+  required int bottom,
+}) {
+  for (var y = top; y < bottom; y++) {
+    for (var x = left; x < right; x++) {
+      final alpha = pixels.getUint8(((y * width) + x) * 4 + 3);
+      if (alpha > 0) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+ReactifyCharacterDocument _transformEquivalenceCharacter() {
+  return const ReactifyCharacterDocument(
+    id: 'char.export',
+    name: 'Export',
+    rig: ReactifyRigTemplate(
+      id: 'export_rig',
+      name: 'Export Rig',
+      anchors: {
+        'torso': ReactifyAnchor(
+          id: 'torso',
+          localTransform: AffineMatrix(a: 1, b: 0, c: 0, d: 1, tx: 40, ty: 50),
+        ),
+      },
+    ),
+    slots: [
+      ReactifySlot(
+        id: 'slot.export',
+        kind: ReactifySlotKind.custom,
+        family: 'custom',
+        name: 'Export Slot',
+        anchorId: 'torso',
+        localTransform: AffineMatrix(a: 1, b: 0, c: 0, d: 1, tx: 10, ty: 15),
+        depth: 1,
+        visible: true,
+        asset: ReactifyAssetRef(
+          id: 'slot.export.asset',
+          kind: ReactifyAssetKind.drawing,
+          uri: 'reactify://drawing/slot.export',
+        ),
+        metadata: {
+          'drawingColor': '#00F5FF',
+          'drawingStrokeWidth': 2.0,
+          'drawingStrokes': [
+            [
+              {'x': 0.0, 'y': 0.0},
+              {'x': 12.0, 'y': 8.0},
+            ],
+          ],
+        },
+      ),
+    ],
+  );
 }

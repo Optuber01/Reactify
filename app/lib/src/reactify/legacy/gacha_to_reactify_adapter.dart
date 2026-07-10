@@ -1,5 +1,6 @@
 import '../../gacha/code/gacha_character_state.dart';
 import '../../gacha/render/character_renderer.dart';
+import '../../gacha/render/gacha_pose_graph.dart';
 import '../../gacha/render/render_part.dart';
 import '../../gacha/render/transform_graph.dart';
 import '../model/reactify_document.dart';
@@ -97,119 +98,25 @@ class GachaToReactifyAdapter {
       fallback: 1,
     );
     final pose = state.numeric('pose');
-    final poseTorso =
-        renderer.tables
-            .posePlacementFor(pose: pose, hostName: 'body')
-            ?.matrix ??
-        const AffineMatrix.identity();
-    final poseHead =
-        renderer.tables
-            .posePlacementFor(pose: pose, hostName: 'head')
-            ?.matrix ??
-        const AffineMatrix.identity();
-    final poseShoulderFront =
-        renderer.tables
-            .posePlacementFor(pose: pose, hostName: 'shoulder_front')
-            ?.matrix ??
-        const AffineMatrix.identity();
-    final poseShoulderBack =
-        renderer.tables
-            .posePlacementFor(pose: pose, hostName: 'shoulder_back')
-            ?.matrix ??
-        const AffineMatrix.identity();
-    final poseForearmFront =
-        renderer.tables
-            .posePlacementFor(pose: pose, hostName: 'sleeve_front')
-            ?.matrix ??
-        const AffineMatrix.identity();
-    final poseForearmBack =
-        renderer.tables
-            .posePlacementFor(pose: pose, hostName: 'sleeve_back')
-            ?.matrix ??
-        const AffineMatrix.identity();
-    final poseThighFront =
-        renderer.tables
-            .posePlacementFor(pose: pose, hostName: 'thigh_front')
-            ?.matrix ??
-        const AffineMatrix.identity();
-    final poseThighBack =
-        renderer.tables
-            .posePlacementFor(pose: pose, hostName: 'thigh_back')
-            ?.matrix ??
-        const AffineMatrix.identity();
-    final poseFeetFront =
-        renderer.tables
-            .posePlacementFor(pose: pose, hostName: 'foot_front')
-            ?.matrix ??
-        const AffineMatrix.identity();
-    final poseFeetBack =
-        renderer.tables
-            .posePlacementFor(pose: pose, hostName: 'foot_back')
-            ?.matrix ??
-        const AffineMatrix.identity();
+    final localTransforms = GachaPoseGraph.localTransforms(
+      renderer.tables,
+      pose,
+    );
     return ReactifyRigTemplate(
       id: 'gacha_compat_2d_v1',
       name: 'Gacha Compatibility 2D Rig',
       anchors: {
-        'torso': ReactifyAnchor(
-          id: 'torso',
-          localTransform: AffineMatrix.scale(
-            heightX,
-            heightY,
-          ).multiply(poseTorso),
-        ),
-        'head': ReactifyAnchor(
-          id: 'head',
-          parentId: 'torso',
-          localTransform: poseTorso.inverse().multiply(poseHead),
-        ),
-        'shoulder_front': ReactifyAnchor(
-          id: 'shoulder_front',
-          parentId: 'torso',
-          localTransform: poseTorso.inverse().multiply(poseShoulderFront),
-        ),
-        'shoulder_back': ReactifyAnchor(
-          id: 'shoulder_back',
-          parentId: 'torso',
-          localTransform: poseTorso.inverse().multiply(poseShoulderBack),
-        ),
-        'forearm_front': ReactifyAnchor(
-          id: 'forearm_front',
-          parentId: 'shoulder_front',
-          localTransform: poseShoulderFront.inverse().multiply(
-            poseForearmFront,
+        for (final anchor in GachaPoseGraph.anchors)
+          anchor.id: ReactifyAnchor(
+            id: anchor.id,
+            parentId: anchor.parentId,
+            localTransform: anchor.id == 'torso'
+                ? AffineMatrix.scale(
+                    heightX,
+                    heightY,
+                  ).multiply(localTransforms[anchor.id]!)
+                : localTransforms[anchor.id]!,
           ),
-        ),
-        'forearm_back': ReactifyAnchor(
-          id: 'forearm_back',
-          parentId: 'shoulder_back',
-          localTransform: poseShoulderBack.inverse().multiply(poseForearmBack),
-        ),
-        'hip': ReactifyAnchor(
-          id: 'hip',
-          parentId: 'torso',
-          localTransform: const AffineMatrix.identity(),
-        ),
-        'thigh_front': ReactifyAnchor(
-          id: 'thigh_front',
-          parentId: 'hip',
-          localTransform: poseTorso.inverse().multiply(poseThighFront),
-        ),
-        'thigh_back': ReactifyAnchor(
-          id: 'thigh_back',
-          parentId: 'hip',
-          localTransform: poseTorso.inverse().multiply(poseThighBack),
-        ),
-        'feet_front': ReactifyAnchor(
-          id: 'feet_front',
-          parentId: 'thigh_front',
-          localTransform: poseThighFront.inverse().multiply(poseFeetFront),
-        ),
-        'feet_back': ReactifyAnchor(
-          id: 'feet_back',
-          parentId: 'thigh_back',
-          localTransform: poseThighBack.inverse().multiply(poseFeetBack),
-        ),
       },
     );
   }

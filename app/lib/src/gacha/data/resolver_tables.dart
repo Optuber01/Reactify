@@ -642,12 +642,7 @@ class ResolverTables {
       localFrame: poseLocalFrameFor(pose),
       name: hostName,
     );
-    return posePlacements[key] ??
-        posePlacements[PosePlacementKey(
-          page: 1,
-          localFrame: 1,
-          name: hostName,
-        )];
+    return posePlacements[key];
   }
 
   HostPlacement? logoPlacementFor(int logopos) {

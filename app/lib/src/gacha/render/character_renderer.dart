@@ -6,6 +6,7 @@ import 'package:flutter_svg/flutter_svg.dart' as vg;
 import '../code/gacha_character_state.dart';
 import '../data/resolver_tables.dart';
 import 'body_renderer.dart';
+import 'gacha_pose_graph.dart';
 import 'head_renderer.dart';
 import 'render_part.dart';
 import 'tint_pipeline.dart';
@@ -67,67 +68,17 @@ class CharacterRenderer {
   }
 
   String _targetJointFor(RenderCatalogPart part) {
-    final host = part.hostName.toLowerCase();
     final scope = part.hostScope.toLowerCase();
-    final family = part.family.toLowerCase();
-
-    if (scope == 'head' ||
-        family.contains('eye') ||
-        family.contains('eyebrow') ||
-        family.contains('hair') ||
-        family == 'hat' ||
-        family == 'glasses' ||
-        family.contains('accessory') ||
-        family.contains('other') ||
-        family == 'mouth' ||
-        family == 'nose' ||
-        family == 'blush' ||
-        family == 'faceshadow') {
+    if (scope == 'head') {
       return 'head';
     }
-    if (host.contains('sleeve_front') ||
-        host.contains('hand_front') ||
-        host.contains('glove_front') ||
-        host.contains('wrist_front') ||
-        family.contains('weapon_front') ||
-        family == 'shield') {
-      return 'forearm_front';
+    final anchorId = GachaPoseGraph.anchorIdForSourceHost(part.hostName);
+    if (anchorId == null) {
+      throw StateError(
+        'Unsupported source pose host ${part.hostName} for ${part.family}.',
+      );
     }
-    if (host.contains('sleeve_back') ||
-        host.contains('hand_back') ||
-        host.contains('glove_back') ||
-        host.contains('wrist_back') ||
-        family.contains('weapon_back')) {
-      return 'forearm_back';
-    }
-    if (host.contains('shoulder_front')) {
-      return 'shoulder_front';
-    }
-    if (host.contains('shoulder_back')) {
-      return 'shoulder_back';
-    }
-    if (host.contains('socks_front') ||
-        host.contains('shoe_front') ||
-        host.contains('foot_front') ||
-        host.contains('knee_front')) {
-      return 'feet_front';
-    }
-    if (host.contains('socks_back') ||
-        host.contains('shoe_back') ||
-        host.contains('foot_back') ||
-        host.contains('knee_back')) {
-      return 'feet_back';
-    }
-    if (host.contains('thigh_front')) {
-      return 'thigh_front';
-    }
-    if (host.contains('thigh_back')) {
-      return 'thigh_back';
-    }
-    if (host.contains('hip') || family.contains('belt')) {
-      return 'hip';
-    }
-    return 'torso';
+    return anchorId;
   }
 
   AffineMatrix _localTransformFor(
@@ -215,110 +166,9 @@ class CharacterRenderer {
       fallback: 1,
     );
     final rootLocal = AffineMatrix.scale(heightX, heightY);
-
-    final poseTorso =
-        tables
-            .posePlacementFor(pose: state.numeric('pose'), hostName: 'body')
-            ?.matrix ??
-        const AffineMatrix.identity();
-    final poseHead =
-        tables
-            .posePlacementFor(pose: state.numeric('pose'), hostName: 'head')
-            ?.matrix ??
-        const AffineMatrix.identity();
-    final poseShoulderFront =
-        tables
-            .posePlacementFor(
-              pose: state.numeric('pose'),
-              hostName: 'shoulder_front',
-            )
-            ?.matrix ??
-        const AffineMatrix.identity();
-    final poseShoulderBack =
-        tables
-            .posePlacementFor(
-              pose: state.numeric('pose'),
-              hostName: 'shoulder_back',
-            )
-            ?.matrix ??
-        const AffineMatrix.identity();
-    final poseSleeveFront =
-        tables
-            .posePlacementFor(
-              pose: state.numeric('pose'),
-              hostName: 'sleeve_front',
-            )
-            ?.matrix ??
-        const AffineMatrix.identity();
-    final poseSleeveBack =
-        tables
-            .posePlacementFor(
-              pose: state.numeric('pose'),
-              hostName: 'sleeve_back',
-            )
-            ?.matrix ??
-        const AffineMatrix.identity();
-    final poseThighFront =
-        tables
-            .posePlacementFor(
-              pose: state.numeric('pose'),
-              hostName: 'thigh_front',
-            )
-            ?.matrix ??
-        const AffineMatrix.identity();
-    final poseThighBack =
-        tables
-            .posePlacementFor(
-              pose: state.numeric('pose'),
-              hostName: 'thigh_back',
-            )
-            ?.matrix ??
-        const AffineMatrix.identity();
-    final poseFeetFront =
-        tables
-            .posePlacementFor(
-              pose: state.numeric('pose'),
-              hostName: 'foot_front',
-            )
-            ?.matrix ??
-        const AffineMatrix.identity();
-    final poseFeetBack =
-        tables
-            .posePlacementFor(
-              pose: state.numeric('pose'),
-              hostName: 'foot_back',
-            )
-            ?.matrix ??
-        const AffineMatrix.identity();
-
-    final torsoWorld = rootLocal.multiply(poseTorso);
-    final headWorld = torsoWorld.multiply(
-      poseTorso.inverse().multiply(poseHead),
-    );
-    final shoulderFrontWorld = torsoWorld.multiply(
-      poseTorso.inverse().multiply(poseShoulderFront),
-    );
-    final shoulderBackWorld = torsoWorld.multiply(
-      poseTorso.inverse().multiply(poseShoulderBack),
-    );
-    final forearmFrontWorld = shoulderFrontWorld.multiply(
-      poseShoulderFront.inverse().multiply(poseSleeveFront),
-    );
-    final forearmBackWorld = shoulderBackWorld.multiply(
-      poseShoulderBack.inverse().multiply(poseSleeveBack),
-    );
-    final hipWorld = torsoWorld;
-    final thighFrontWorld = hipWorld.multiply(
-      poseTorso.inverse().multiply(poseThighFront),
-    );
-    final thighBackWorld = hipWorld.multiply(
-      poseTorso.inverse().multiply(poseThighBack),
-    );
-    final feetFrontWorld = thighFrontWorld.multiply(
-      poseThighFront.inverse().multiply(poseFeetFront),
-    );
-    final feetBackWorld = thighBackWorld.multiply(
-      poseThighBack.inverse().multiply(poseFeetBack),
+    final poseWorld = GachaPoseGraph.worldTransforms(
+      tables,
+      state.numeric('pose'),
     );
 
     var bounds = Rect.zero;
@@ -328,44 +178,15 @@ class CharacterRenderer {
       final asset = assets[part.catalogPart.appAssetPath];
       if (asset == null) continue;
 
-      AffineMatrix parentWorld;
-      switch (part.targetJoint) {
-        case 'head':
-          parentWorld = headWorld;
-          break;
-        case 'shoulder_front':
-          parentWorld = shoulderFrontWorld;
-          break;
-        case 'shoulder_back':
-          parentWorld = shoulderBackWorld;
-          break;
-        case 'forearm_front':
-          parentWorld = forearmFrontWorld;
-          break;
-        case 'forearm_back':
-          parentWorld = forearmBackWorld;
-          break;
-        case 'hip':
-          parentWorld = hipWorld;
-          break;
-        case 'thigh_front':
-          parentWorld = thighFrontWorld;
-          break;
-        case 'thigh_back':
-          parentWorld = thighBackWorld;
-          break;
-        case 'feet_front':
-          parentWorld = feetFrontWorld;
-          break;
-        case 'feet_back':
-          parentWorld = feetBackWorld;
-          break;
-        default:
-          parentWorld = torsoWorld;
-          break;
+      final poseParentWorld = poseWorld[part.targetJoint];
+      if (poseParentWorld == null) {
+        throw StateError(
+          'Missing logical pose anchor ${part.targetJoint} for ${part.catalogPart.family}.',
+        );
       }
-
-      final worldMatrix = parentWorld.multiply(part.localTransform);
+      final worldMatrix = rootLocal
+          .multiply(poseParentWorld)
+          .multiply(part.localTransform);
       final b = worldMatrix.transformRect(
         Rect.fromLTWH(0, 0, asset.size.width, asset.size.height),
       );

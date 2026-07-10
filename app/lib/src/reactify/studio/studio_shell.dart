@@ -4,6 +4,7 @@ import '../../gacha/ui/character_creator_screen.dart';
 import 'reaction_composer.dart';
 import 'studio_project_controller.dart';
 import '../text/reaction_text_editor.dart';
+import '../timeline/timeline.dart';
 
 class ReactifyStudioShell extends StatefulWidget {
   const ReactifyStudioShell({super.key});
@@ -20,6 +21,7 @@ class _ReactifyStudioShellState extends State<ReactifyStudioShell> {
     const _CharacterStudioPage(),
     ReactionComposer(controller: _projectController),
     null,
+    TimelineWorkspace(controller: _projectController),
   ];
 
   static const _destinations = [
@@ -38,6 +40,11 @@ class _ReactifyStudioShellState extends State<ReactifyStudioShell> {
       selectedIcon: Icon(Icons.subtitles),
       label: 'Dialogue',
     ),
+    NavigationDestination(
+      icon: Icon(Icons.video_file_outlined),
+      selectedIcon: Icon(Icons.video_file),
+      label: 'Timeline',
+    ),
   ];
 
   static const _railDestinations = [
@@ -55,6 +62,11 @@ class _ReactifyStudioShellState extends State<ReactifyStudioShell> {
       icon: Icon(Icons.subtitles_outlined),
       selectedIcon: Icon(Icons.subtitles),
       label: Text('Dialogue'),
+    ),
+    NavigationRailDestination(
+      icon: Icon(Icons.video_file_outlined),
+      selectedIcon: Icon(Icons.video_file),
+      label: Text('Timeline'),
     ),
   ];
 

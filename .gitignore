@@ -33,6 +33,12 @@
 /agents.md
 /AGENTS.md
 /tools/
+!/tools/
+/tools/*
+!/tools/gacha_swf_manifest.py
+!/tools/export_swf_shape_assets.py
+!/tools/test_export_swf_shape_assets.py
+!/tools/requirements.txt
 /docs/
 /thoughts/
 /.research/

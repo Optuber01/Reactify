@@ -44,7 +44,7 @@ class ReactionTextStyle {
   final ReactionTextCapitalization? capitalization;
 
   static const defaults = ReactionTextStyle(
-    fontFamily: 'Arial',
+    fontFamily: 'Roboto Condensed',
     fontSize: 42,
     fontWeight: 700,
     italic: false,
@@ -511,7 +511,7 @@ class ReactionTextPresetLibrary {
     name: 'All Character Dialogue',
     category: 'character-dialogue',
     style: ReactionTextStyle(
-      fontFamily: 'Arial Narrow',
+      fontFamily: 'Roboto Condensed',
       fontSize: 46,
       fontWeight: 800,
       fillColor: 0xffffffff,
@@ -532,7 +532,7 @@ class ReactionTextPresetLibrary {
     name: 'Audience Talk',
     category: 'viewer-text',
     style: ReactionTextStyle(
-      fontFamily: 'Arial',
+      fontFamily: 'Roboto Condensed',
       fontSize: 40,
       fontWeight: 700,
       fillColor: 0xfffff4cf,
@@ -551,7 +551,7 @@ class ReactionTextPresetLibrary {
     name: 'Copyright Notice',
     category: 'copyright-notice',
     style: ReactionTextStyle(
-      fontFamily: 'Arial',
+      fontFamily: 'Roboto Condensed',
       fontSize: 34,
       fontWeight: 700,
       fillColor: 0xffffffff,
@@ -568,7 +568,7 @@ class ReactionTextPresetLibrary {
     name: 'Copyright Notice Compact',
     category: 'copyright-notice',
     style: ReactionTextStyle(
-      fontFamily: 'Arial',
+      fontFamily: 'Roboto Condensed',
       fontSize: 28,
       fontWeight: 700,
       fillColor: 0xffffffff,
@@ -587,7 +587,7 @@ class ReactionTextPresetLibrary {
     name: 'Members Disclaimer and Shoutout',
     category: 'members',
     style: ReactionTextStyle(
-      fontFamily: 'Arial',
+      fontFamily: 'Roboto Condensed',
       fontSize: 38,
       fontWeight: 700,
       fillColor: 0xffffe082,
@@ -604,7 +604,7 @@ class ReactionTextPresetLibrary {
     name: 'Quick Break',
     category: 'break',
     style: ReactionTextStyle(
-      fontFamily: 'Arial',
+      fontFamily: 'Roboto Condensed',
       fontSize: 52,
       fontWeight: 900,
       fillColor: 0xffffffff,

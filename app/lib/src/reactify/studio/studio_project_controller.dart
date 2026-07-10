@@ -29,6 +29,14 @@ class StudioProjectController extends ChangeNotifier {
   bool get canRedo => _store.canRedo;
   bool get hasActiveDraft => _store.hasActiveDraft;
 
+  ProjectChangeSummary executeCommand(ProjectCommand command) {
+    return _store.execute(command);
+  }
+
+  ProjectChangeSummary executeCommandBatch(ProjectCommandBatch batch) {
+    return _store.executeBatch(batch);
+  }
+
   void selectTimeline(TimelineId id) {
     if (!project.timelines.containsKey(id) || id == selectedTimelineId) return;
     selectedTimelineId = id;
@@ -445,7 +453,7 @@ ReactifyProjectDocument buildReactionStudioTemplate() {
 
 Map<TextPresetId, TextPreset> _templateTextPresets() {
   const dialogueStyle = TextStyleSpec(
-    fontFamily: 'Arial Narrow',
+    fontFamily: 'Roboto Condensed',
     fontSize: 46,
     fontWeight: 800,
     fillColor: '#FFFFFF',

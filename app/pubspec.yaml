@@ -21,6 +21,10 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  fonts:
+    - family: Roboto Condensed
+      fonts:
+        - asset: assets/fonts/roboto_condensed/RobotoCondensed-Variable.ttf
   assets:
     - assets/data/asset-resolution/
     - assets/data/generated/

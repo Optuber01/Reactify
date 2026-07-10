@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../gacha/ui/character_creator_screen.dart';
+import 'reaction_composer.dart';
+import 'studio_project_controller.dart';
 import '../text/reaction_text_editor.dart';
 
 class ReactifyStudioShell extends StatefulWidget {
@@ -12,13 +14,24 @@ class ReactifyStudioShell extends StatefulWidget {
 
 class _ReactifyStudioShellState extends State<ReactifyStudioShell> {
   var _selectedIndex = 0;
-  final List<Widget?> _pages = [const _CharacterStudioPage(), null];
+  late final StudioProjectController _projectController =
+      StudioProjectController();
+  late final List<Widget?> _pages = [
+    const _CharacterStudioPage(),
+    ReactionComposer(controller: _projectController),
+    null,
+  ];
 
   static const _destinations = [
     NavigationDestination(
       icon: Icon(Icons.auto_awesome_motion_outlined),
       selectedIcon: Icon(Icons.auto_awesome_motion),
       label: 'Characters',
+    ),
+    NavigationDestination(
+      icon: Icon(Icons.groups_2_outlined),
+      selectedIcon: Icon(Icons.groups_2),
+      label: 'Reactions',
     ),
     NavigationDestination(
       icon: Icon(Icons.subtitles_outlined),
@@ -32,6 +45,11 @@ class _ReactifyStudioShellState extends State<ReactifyStudioShell> {
       icon: Icon(Icons.auto_awesome_motion_outlined),
       selectedIcon: Icon(Icons.auto_awesome_motion),
       label: Text('Characters'),
+    ),
+    NavigationRailDestination(
+      icon: Icon(Icons.groups_2_outlined),
+      selectedIcon: Icon(Icons.groups_2),
+      label: Text('Reactions'),
     ),
     NavigationRailDestination(
       icon: Icon(Icons.subtitles_outlined),
@@ -88,6 +106,12 @@ class _ReactifyStudioShellState extends State<ReactifyStudioShell> {
             'Cassie: Kill them all...\nKai: What do I even say to this...\nJet: This is what I expected.',
       );
     });
+  }
+
+  @override
+  void dispose() {
+    _projectController.dispose();
+    super.dispose();
   }
 }
 

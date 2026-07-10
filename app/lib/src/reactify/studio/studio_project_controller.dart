@@ -82,6 +82,16 @@ class StudioProjectController extends ChangeNotifier {
     );
   }
 
+  void setCharacterTransform(String instanceId, AffineTransform? transform) {
+    _store.execute(
+      UpdateReactionCharacterCommand(
+        reactionStateId: selectedReactionStateId,
+        instanceId: instanceId,
+        transform: transform,
+      ),
+    );
+  }
+
   void applyExpressionToCharacters(
     Iterable<String> instanceIds,
     ExpressionId? expressionId,
@@ -96,6 +106,31 @@ class StudioProjectController extends ChangeNotifier {
               instanceId: instanceId,
               expressionId: expressionId,
             ),
+        ],
+      ),
+    );
+  }
+
+  void applyExpressionNameToCharacters(
+    Iterable<String> instanceIds,
+    String expressionName,
+  ) {
+    final instances = {
+      for (final instance in selectedReactionState.characters)
+        instance.id: instance,
+    };
+    _store.executeBatch(
+      ProjectCommandBatch(
+        label: 'Apply $expressionName expression',
+        commands: [
+          for (final instanceId in instanceIds)
+            if (instances[instanceId] case final instance?)
+              UpdateReactionCharacterCommand(
+                reactionStateId: selectedReactionStateId,
+                instanceId: instanceId,
+                expressionId:
+                    'expression.${instance.characterId.split('.').last}.$expressionName',
+              ),
         ],
       ),
     );

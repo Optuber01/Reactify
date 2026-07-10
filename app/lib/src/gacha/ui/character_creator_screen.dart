@@ -1553,12 +1553,15 @@ class _NativeSceneControls extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 8),
-          SwitchListTile(
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-            title: const Text('Hide selected hair slot'),
-            value: hideNativeHair,
-            onChanged: onHairOverrideChanged,
+          Material(
+            color: Colors.transparent,
+            child: SwitchListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Hide selected hair slot'),
+              value: hideNativeHair,
+              onChanged: onHairOverrideChanged,
+            ),
           ),
           const SizedBox(height: 8),
           Wrap(
@@ -1939,21 +1942,24 @@ class _EditorInspector extends StatelessWidget {
                 for (final spec in _displayFields)
                   SizedBox(
                     width: 265,
-                    child: SwitchListTile(
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 4,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: SwitchListTile(
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 4,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: const BorderSide(color: Color(0xFFB9C2CA)),
+                        ),
+                        title: Text(spec.label),
+                        value: currentState.numeric(spec.field) != 0,
+                        onChanged: (enabled) {
+                          onFieldSelected(spec.field);
+                          onNumericFieldChanged(spec.field, enabled ? 1 : 0);
+                        },
                       ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        side: const BorderSide(color: Color(0xFFB9C2CA)),
-                      ),
-                      title: Text(spec.label),
-                      value: currentState.numeric(spec.field) != 0,
-                      onChanged: (enabled) {
-                        onFieldSelected(spec.field);
-                        onNumericFieldChanged(spec.field, enabled ? 1 : 0);
-                      },
                     ),
                   ),
               ],

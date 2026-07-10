@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:ui';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -22,6 +23,52 @@ import 'widgets/collapsible_sidebar.dart';
 import 'widgets/canvas_preview.dart';
 import 'debug_render_panel.dart';
 import 'editor_helpers.dart';
+
+AffineMatrix initialCameraForBounds(Rect bounds, Size canvas) {
+  const paddingFraction = 0.1;
+  final scale = math.min(
+    canvas.width * (1 - paddingFraction * 2) / bounds.width,
+    canvas.height * (1 - paddingFraction * 2) / bounds.height,
+  );
+  return AffineMatrix(
+    a: scale,
+    b: 0,
+    c: 0,
+    d: scale,
+    tx: canvas.width / 2 - bounds.center.dx * scale,
+    ty: canvas.height / 2 - bounds.center.dy * scale,
+  );
+}
+
+ReactifySceneDocument normalizeCharacterPreviewScene(
+  ReactifySceneDocument scene,
+  ReactifyCharacterDocument document,
+) {
+  final matching = scene.characters.where(
+    (entry) =>
+        entry.characterId == document.id || entry.characterId == 'char.current',
+  );
+  if (matching.isEmpty) {
+    throw const FormatException(
+      'Preview scene does not contain the selected character.',
+    );
+  }
+  final camera = scene.cameraTransform;
+  final determinant = camera.a * camera.d - camera.b * camera.c;
+  final values = [camera.a, camera.b, camera.c, camera.d, camera.tx, camera.ty];
+  if (scene.metadata['cameraInitialized'] == true &&
+      (values.any((value) => !value.isFinite) || determinant.abs() < 1e-9)) {
+    throw const FormatException('Preview camera is not usable.');
+  }
+  return scene.copyWith(
+    characters: [
+      for (final entry in scene.characters)
+        if (entry.characterId == document.id ||
+            entry.characterId == 'char.current')
+          entry.copyWith(characterId: 'char.current'),
+    ],
+  );
+}
 
 class CharacterCreatorScreen extends StatefulWidget {
   const CharacterCreatorScreen({
@@ -626,6 +673,7 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
     _activeLibraryCharacterId = id;
     final legacyCode = resource.legacyGachaCode?.trim();
     ReactifyCharacterDocument? document;
+    ReactifySceneDocument? previewScene;
     try {
       if (resource.document['rig'] is Map &&
           resource.document['slots'] is List) {
@@ -633,6 +681,28 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
       }
     } catch (_) {
       document = null;
+    }
+    String? previewWarning;
+    try {
+      final sceneJson = resource.document['previewScene'];
+      if (sceneJson is Map) {
+        previewScene = ReactifySceneDocument.fromJson(
+          sceneJson.cast<String, Object?>(),
+        );
+      }
+    } catch (error) {
+      previewScene = null;
+      previewWarning =
+          'Preview scene could not be restored; a new camera will be fitted: $error';
+    }
+    if (document != null && previewScene != null) {
+      try {
+        previewScene = normalizeCharacterPreviewScene(previewScene, document);
+      } catch (error) {
+        previewScene = null;
+        previewWarning =
+            'Preview scene could not be restored; a new camera will be fitted: $error';
+      }
     }
     if (legacyCode != null && legacyCode.isNotEmpty) {
       try {
@@ -647,6 +717,7 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
           baselineLabel: resource.name,
           selectedField: null,
           messageText: 'Loaded ${resource.name} from the project library.',
+          restoredScene: previewScene,
         );
       } catch (error) {
         if (!mounted || serial != _libraryLoadSerial) return;
@@ -659,7 +730,7 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
     }
     if (!mounted || serial != _libraryLoadSerial) return;
     if (document != null) {
-      final editor = _nativeEditor ?? _nativeEditorForDocument(document);
+      final editor = _nativeEditorForDocument(document, scene: previewScene);
       final currentDocument = document.copyWith(
         id: 'char.current',
         name: resource.name,
@@ -672,7 +743,12 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
             currentDocument.id: currentDocument,
           },
         ),
-        messageText: 'Loaded ${resource.name} from the project library.',
+        messageText:
+            previewWarning ??
+            'Loaded ${resource.name} from the project library.',
+        initializeCamera:
+            previewScene == null ||
+            previewScene.metadata['cameraInitialized'] != true,
       );
       _libraryDocumentHasNoLegacyState =
           legacyCode == null || legacyCode.isEmpty;
@@ -690,23 +766,28 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
   }
 
   ReactifySceneEditingState _nativeEditorForDocument(
-    ReactifyCharacterDocument document,
-  ) {
+    ReactifyCharacterDocument document, {
+    ReactifySceneDocument? scene,
+  }) {
     final current = document.copyWith(id: 'char.current');
     return ReactifySceneEditingState(
-      selectedSceneCharacterId: 'scene_char.current',
-      scene: const ReactifySceneDocument(
-        id: 'scene.current',
-        name: 'Character Preview',
-        characters: [
-          ReactifySceneCharacter(
-            id: 'scene_char.current',
-            characterId: 'char.current',
-            transform: AffineMatrix(a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0),
-            pose: 'current',
+      selectedSceneCharacterId: scene?.characters.isNotEmpty == true
+          ? scene!.characters.first.id
+          : 'scene_char.current',
+      scene:
+          scene ??
+          const ReactifySceneDocument(
+            id: 'scene.current',
+            name: 'Character Preview',
+            characters: [
+              ReactifySceneCharacter(
+                id: 'scene_char.current',
+                characterId: 'char.current',
+                transform: AffineMatrix(a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0),
+                pose: 'current',
+              ),
+            ],
           ),
-        ],
-      ),
       characters: {current.id: current},
     );
   }
@@ -885,9 +966,13 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
     return CharacterResource(
       id: id,
       name: name,
-      document: document
-          .copyWith(id: id, name: name, legacyGachaCode: code)
-          .toJson(),
+      document: {
+        ...document
+            .copyWith(id: id, name: name, legacyGachaCode: code)
+            .toJson(),
+        if (_nativeEditor case final editor?)
+          'previewScene': editor.scene.toJson(),
+      },
       legacyGachaCode: code,
       thumbnailAssetId: existing?.thumbnailAssetId,
       metadata: {...?existing?.metadata, 'source': 'character_editor'},
@@ -1381,6 +1466,7 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
     String? selectedField,
     String? messageText,
     bool recordHistory = false,
+    ReactifySceneDocument? restoredScene,
   }) async {
     _libraryDocumentHasNoLegacyState = false;
     final previousState = _currentState;
@@ -1405,14 +1491,33 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
       }
     });
     try {
-      final editor = _buildNativeEditorForState(
+      var editor = _buildNativeEditorForState(
         next,
         resetScene: baselineState != null,
+        restoredScene: restoredScene,
       );
-      final scene = await _reactifyBridge.buildRenderableScene(
+      var scene = await _reactifyBridge.buildRenderableScene(
         editor.scene,
         editor.characters,
       );
+      if (baselineState != null &&
+          editor.scene.metadata['cameraInitialized'] != true &&
+          !scene.worldBounds.isEmpty) {
+        final camera = initialCameraForBounds(
+          scene.worldBounds,
+          editor.scene.canvasSize,
+        );
+        editor = editor.copyWith(
+          scene: editor.scene.copyWith(
+            cameraTransform: camera,
+            metadata: {...editor.scene.metadata, 'cameraInitialized': true},
+          ),
+        );
+        scene = await _reactifyBridge.buildRenderableScene(
+          editor.scene,
+          editor.characters,
+        );
+      }
       final reactifyResolvedPartCount = _reactifyBridge
           .resolveSceneParts(editor.scene, editor.characters)
           .length;
@@ -1468,6 +1573,7 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
   Future<void> _applyNativeEditor(
     ReactifySceneEditingState editor, {
     String? messageText,
+    bool initializeCamera = false,
   }) async {
     final serial = ++_renderSerial;
     final previousScene = _scene;
@@ -1479,23 +1585,57 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
       }
     });
     try {
-      final scene = await _reactifyBridge.buildRenderableScene(
+      var nextEditor = editor;
+      var scene = await _reactifyBridge.buildRenderableScene(
         editor.scene,
         editor.characters,
       );
+      final canvasBounds = Offset.zero & editor.scene.canvasSize;
+      final invalidFraming =
+          editor.scene.metadata['cameraInitialized'] == true &&
+          !scene.worldBounds.isEmpty &&
+          !canvasBounds.overlaps(scene.worldBounds);
+      if ((initializeCamera || invalidFraming) && !scene.worldBounds.isEmpty) {
+        final fitBounds = invalidFraming
+            ? (await _reactifyBridge.buildRenderableScene(
+                editor.scene.copyWith(
+                  cameraTransform: const AffineMatrix.identity(),
+                ),
+                editor.characters,
+              )).worldBounds
+            : scene.worldBounds;
+        nextEditor = editor.copyWith(
+          scene: editor.scene.copyWith(
+            cameraTransform: initialCameraForBounds(
+              fitBounds,
+              editor.scene.canvasSize,
+            ),
+            metadata: {...editor.scene.metadata, 'cameraInitialized': true},
+          ),
+        );
+        scene = await _reactifyBridge.buildRenderableScene(
+          nextEditor.scene,
+          nextEditor.characters,
+        );
+      }
       final reactifyResolvedPartCount = _reactifyBridge
-          .resolveSceneParts(editor.scene, editor.characters)
+          .resolveSceneParts(nextEditor.scene, nextEditor.characters)
           .length;
       if (!mounted || serial != _renderSerial) {
         return;
       }
       setState(() {
         _scene = scene;
-        _nativeEditor = editor;
-        _reactifyCharacter = editor.selectedCharacterDocument;
+        _nativeEditor = nextEditor;
+        _reactifyCharacter = nextEditor.selectedCharacterDocument;
         _reactifyResolvedPartCount = reactifyResolvedPartCount;
-        _hideNativeHair = _selectedHairOverrideHidden(editor);
+        _hideNativeHair = _selectedHairOverrideHidden(nextEditor);
         _sceneLoading = false;
+        if (invalidFraming) {
+          _messageText =
+              'Stored preview framing was outside the canvas; a new camera was fitted.';
+          _messageIsError = false;
+        }
       });
       _game.updateFlatScene(scene);
     } catch (error) {
@@ -1514,6 +1654,7 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
   ReactifySceneEditingState _buildNativeEditorForState(
     GachaCharacterState currentState, {
     required bool resetScene,
+    ReactifySceneDocument? restoredScene,
   }) {
     var currentCharacter = _reactifyAdapter.migrate(
       currentState,
@@ -1528,20 +1669,25 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
       currentCharacter = currentCharacter.addSlot(slot);
     }
     if (existing == null) {
+      final persistedScene = restoredScene;
       return ReactifySceneEditingState(
-        selectedSceneCharacterId: 'scene_char.current',
-        scene: const ReactifySceneDocument(
-          id: 'scene.current',
-          name: 'Current Native Scene',
-          characters: [
-            ReactifySceneCharacter(
-              id: 'scene_char.current',
-              characterId: 'char.current',
-              transform: AffineMatrix(a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0),
-              pose: 'current',
+        selectedSceneCharacterId: persistedScene?.characters.isNotEmpty == true
+            ? persistedScene!.characters.first.id
+            : 'scene_char.current',
+        scene:
+            persistedScene ??
+            const ReactifySceneDocument(
+              id: 'scene.current',
+              name: 'Current Native Scene',
+              characters: [
+                ReactifySceneCharacter(
+                  id: 'scene_char.current',
+                  characterId: 'char.current',
+                  transform: AffineMatrix(a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0),
+                  pose: 'current',
+                ),
+              ],
             ),
-          ],
-        ),
         characters: {currentCharacter.id: currentCharacter},
       );
     }

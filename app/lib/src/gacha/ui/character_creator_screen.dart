@@ -190,12 +190,17 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
   }
 
   Future<void> _initializeEditor() async {
-    final firstCase = widget.tables.editorFixtures.first;
-    _selectedCaseId = firstCase.id;
-    await _loadFixture(firstCase.id);
     final selectedId = widget.selectedLibraryCharacterId;
-    if (mounted && selectedId != null) {
+    if (selectedId != null) {
       await _loadLibraryCharacter(selectedId);
+      return;
+    }
+    if (mounted) {
+      setState(() {
+        _messageText =
+            'Select a project character or import a Gacha Club code to begin.';
+        _messageIsError = false;
+      });
     }
   }
 
@@ -558,8 +563,7 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
     }
     if (!mounted || serial != _libraryLoadSerial) return;
     if (document != null) {
-      final editor = _nativeEditor;
-      if (editor == null) return;
+      final editor = _nativeEditor ?? _nativeEditorForDocument(document);
       final currentDocument = document.copyWith(
         id: 'char.current',
         name: resource.name,
@@ -587,6 +591,28 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
         _messageIsError = false;
       });
     }
+  }
+
+  ReactifySceneEditingState _nativeEditorForDocument(
+    ReactifyCharacterDocument document,
+  ) {
+    final current = document.copyWith(id: 'char.current');
+    return ReactifySceneEditingState(
+      selectedSceneCharacterId: 'scene_char.current',
+      scene: const ReactifySceneDocument(
+        id: 'scene.current',
+        name: 'Character Preview',
+        characters: [
+          ReactifySceneCharacter(
+            id: 'scene_char.current',
+            characterId: 'char.current',
+            transform: AffineMatrix(a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0),
+            pose: 'current',
+          ),
+        ],
+      ),
+      characters: {current.id: current},
+    );
   }
 
   Future<void> _addCurrentToLibrary() async {
@@ -774,9 +800,7 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
 
   String _suggestedCharacterName() {
     final documentName = _currentLibraryDocument?.name.trim();
-    if (documentName != null &&
-        documentName.isNotEmpty &&
-        documentName != 'Partner') {
+    if (documentName != null && documentName.isNotEmpty) {
       return documentName == 'Migrated Gacha Character'
           ? 'New Character'
           : documentName;
@@ -1408,10 +1432,6 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
       currentCharacter = currentCharacter.addSlot(slot);
     }
     if (existing == null) {
-      final partnerCharacter = currentCharacter.copyWith(
-        id: 'char.partner',
-        name: 'Partner',
-      );
       return ReactifySceneEditingState(
         selectedSceneCharacterId: 'scene_char.current',
         scene: const ReactifySceneDocument(
@@ -1421,45 +1441,18 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
             ReactifySceneCharacter(
               id: 'scene_char.current',
               characterId: 'char.current',
-              transform: AffineMatrix(
-                a: 0.92,
-                b: 0,
-                c: 0,
-                d: 0.92,
-                tx: -180,
-                ty: 0,
-              ),
+              transform: AffineMatrix(a: 1, b: 0, c: 0, d: 1, tx: 0, ty: 0),
               pose: 'current',
-            ),
-            ReactifySceneCharacter(
-              id: 'scene_char.partner',
-              characterId: 'char.partner',
-              transform: AffineMatrix(
-                a: 0.92,
-                b: 0,
-                c: 0,
-                d: 0.92,
-                tx: 180,
-                ty: 0,
-              ),
-              pose: 'partner',
             ),
           ],
         ),
-        characters: {
-          currentCharacter.id: currentCharacter,
-          partnerCharacter.id: partnerCharacter,
-        },
+        characters: {currentCharacter.id: currentCharacter},
       );
     }
     final characters = <String, ReactifyCharacterDocument>{
       ...existing.characters,
       currentCharacter.id: currentCharacter,
     };
-    characters.putIfAbsent(
-      'char.partner',
-      () => currentCharacter.copyWith(id: 'char.partner', name: 'Partner'),
-    );
     final sceneCharacters = [...existing.scene.characters];
     if (!sceneCharacters.any(
       (character) => character.id == 'scene_char.current',
@@ -1478,18 +1471,6 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
             ty: 0,
           ),
           pose: 'current',
-        ),
-      );
-    }
-    if (!sceneCharacters.any(
-      (character) => character.id == 'scene_char.partner',
-    )) {
-      sceneCharacters.add(
-        const ReactifySceneCharacter(
-          id: 'scene_char.partner',
-          characterId: 'char.partner',
-          transform: AffineMatrix(a: 0.92, b: 0, c: 0, d: 0.92, tx: 180, ty: 0),
-          pose: 'partner',
         ),
       );
     }
@@ -1577,20 +1558,30 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
     if (editor == null) {
       return;
     }
-    const asset = ReactifyRegisteredAsset(
-      id: 'user.asset.sample.svg',
+    final result = await FilePicker.pickFiles(
+      dialogTitle: 'Attach SVG asset',
+      type: FileType.custom,
+      allowedExtensions: const ['svg'],
+      allowMultiple: false,
+      lockParentWindow: true,
+    );
+    final path = result?.files.single.path;
+    if (path == null) return;
+    final fileName = result!.files.single.name;
+    final asset = ReactifyRegisteredAsset(
+      id: 'user.asset.${DateTime.now().microsecondsSinceEpoch}',
       kind: ReactifyAssetKind.svg,
-      uri: 'assets/gacha/head/head_1.svg',
+      uri: path,
       source: 'user',
       dimensions: Size(600, 600),
-      metadata: {'label': 'Sample SVG', 'source': 'editor_sample'},
+      metadata: {'label': fileName, 'source': 'file_picker'},
     );
     await _applyNativeEditor(
       editor
           .registerAsset(asset)
           .attachRegisteredAssetSlotToSelectedCharacter(
             assetId: asset.id,
-            name: 'Registered SVG',
+            name: fileName,
             localTransform: const AffineMatrix(
               a: 0.18,
               b: 0,

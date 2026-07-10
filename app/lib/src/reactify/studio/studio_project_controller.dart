@@ -16,14 +16,18 @@ class StudioProjectController extends ChangeNotifier {
        _store = ProjectCommandStore(
          initialProject ?? buildReactionStudioTemplate(),
        ) {
+    _projectWriter = SerializedProjectWriter(this.repository);
     _store.addListener(_handleStoreChange);
     selectedTimelineId = _store.project.timelines.keys.first;
     selectedReactionStateId = _store.project.reactionStates.keys.first;
-    selectedCharacterId = _store.project.characters.keys.first;
+    selectedCharacterId = _store.project.characters.isEmpty
+        ? null
+        : _store.project.characters.keys.first;
   }
 
   ProjectCommandStore _store;
   final ProjectRepository repository;
+  late final SerializedProjectWriter _projectWriter;
   final Duration autosaveDelay;
   late TimelineId selectedTimelineId;
   late ReactionStateId selectedReactionStateId;
@@ -112,9 +116,13 @@ class StudioProjectController extends ChangeNotifier {
   Future<ProjectSaveResult> saveProjectAs(String location) async {
     return _withBusy(() async {
       final savingProject = project;
-      final result = await repository.save(savingProject, location);
+      final versionedResult = await _projectWriter.save(
+        savingProject,
+        location,
+      );
+      final result = versionedResult.result;
       projectLocation = location;
-      _cleanProjectJson = savingProject.toDeterministicJson();
+      _cleanProjectJson = versionedResult.project.toDeterministicJson();
       lastSaveMetadata = result.metadata;
       lastLoadSource = ProjectLoadSource.primary;
       _autosaveTimer?.cancel();
@@ -682,7 +690,7 @@ String _slug(String value) {
 
 ReactifyProjectDocument buildReactionStudioTemplate() {
   const canvas = ProjectCanvas(width: 1920, height: 1080);
-  const characterNames = ['Cassie', 'Nephis', 'Kai', 'Jet', 'Sunny', 'Effie'];
+  const characterNames = <String>[];
   final characters = <CharacterId, CharacterResource>{};
   final expressions = <ExpressionId, ExpressionPreset>{};
   final poses = <PoseId, PosePreset>{};
@@ -695,7 +703,7 @@ ReactifyProjectDocument buildReactionStudioTemplate() {
     characters[characterId] = CharacterResource(
       id: characterId,
       name: name,
-      document: const {'schemaVersion': 1, 'source': 'template'},
+      document: const {},
       metadata: {'accent': _characterAccents[index]},
     );
     for (final expression in const ['neutral', 'happy', 'shock']) {
@@ -791,7 +799,14 @@ ReactifyProjectDocument buildReactionStudioTemplate() {
 
   final textPresets = _templateTextPresets();
   final speakers = <SpeakerRuleId, SpeakerRule>{
-    for (final name in characterNames)
+    for (final name in const [
+      'Cassie',
+      'Nephis',
+      'Kai',
+      'Jet',
+      'Sunny',
+      'Effie',
+    ])
       'speaker.${name.toLowerCase()}': SpeakerRule(
         id: 'speaker.${name.toLowerCase()}',
         speakerId: name.toLowerCase(),
@@ -799,7 +814,15 @@ ReactifyProjectDocument buildReactionStudioTemplate() {
         aliases: name == 'Cassie' ? const ['Cass'] : const [],
         textPresetId: 'text.all-character-dialogue',
         styleOverride: TextStyleSpec(
-          fillColor: _characterAccents[characterNames.indexOf(name)],
+          fillColor:
+              _characterAccents[const [
+                'Cassie',
+                'Nephis',
+                'Kai',
+                'Jet',
+                'Sunny',
+                'Effie',
+              ].indexOf(name)],
         ),
       ),
     'speaker.default': const SpeakerRule(

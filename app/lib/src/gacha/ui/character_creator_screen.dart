@@ -383,6 +383,7 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
                         _updateSelectedNativeTransform(transform);
                       },
                       onNumericFieldChanged: _updateNumericField,
+                      onRawFieldChanged: _updateRawField,
                       onColorDraftChanged: _updateColorDraft,
                       onColorCommit: _commitColorField,
                       onFieldSelected: _selectField,
@@ -707,6 +708,44 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
       messageText: 'Updated $field to $nextValue ($previewLabel).',
       recordHistory: true,
     );
+  }
+
+  Future<void> _updateRawField(String field, String rawValue) async {
+    final currentState = _currentState;
+    if (currentState == null) {
+      return;
+    }
+    final definition = widget.tables.schema.byName[field];
+    if (definition?.kind == GachaFieldKind.metadata && rawValue.contains('|')) {
+      setState(() {
+        _selectedField = field;
+        _messageText = 'The | delimiter is not valid inside $field.';
+        _messageIsError = true;
+      });
+      return;
+    }
+    try {
+      final next = currentState.updateRawField(
+        widget.tables.schema,
+        field,
+        rawValue,
+      );
+      await _setCurrentState(
+        next,
+        selectedField: field,
+        messageText: 'Updated $field without applying preview-range clamping.',
+        recordHistory: true,
+      );
+    } on FormatException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _selectedField = field;
+        _messageText = error.message;
+        _messageIsError = true;
+      });
+    }
   }
 
   void _updateColorDraft(String field, String value) {
@@ -1834,6 +1873,7 @@ class _EditorInspector extends StatelessWidget {
     required this.onNativeSceneCharacterSelected,
     required this.onNativeTransformChanged,
     required this.onNumericFieldChanged,
+    required this.onRawFieldChanged,
     required this.onColorDraftChanged,
     required this.onColorCommit,
     required this.onFieldSelected,
@@ -1872,6 +1912,7 @@ class _EditorInspector extends StatelessWidget {
   final ValueChanged<String> onNativeSceneCharacterSelected;
   final ValueChanged<AffineMatrix> onNativeTransformChanged;
   final Future<void> Function(String field, int value) onNumericFieldChanged;
+  final Future<void> Function(String field, String rawValue) onRawFieldChanged;
   final void Function(String field, String value) onColorDraftChanged;
   final Future<void> Function(String field) onColorCommit;
   final ValueChanged<String> onFieldSelected;
@@ -2165,6 +2206,16 @@ class _EditorInspector extends StatelessWidget {
                 ],
               ],
             ),
+          ),
+          const SizedBox(height: 16),
+          _AdvancedFieldsSection(
+            schema: schema,
+            state: currentState,
+            colorDrafts: colorDrafts,
+            onRawFieldChanged: onRawFieldChanged,
+            onColorDraftChanged: onColorDraftChanged,
+            onColorCommit: onColorCommit,
+            onFieldSelected: onFieldSelected,
           ),
           const SizedBox(height: 16),
           DebugRenderPanel(
@@ -2587,6 +2638,393 @@ class _ColorFieldTile extends StatelessWidget {
       ),
     );
   }
+}
+
+enum _AdvancedFieldFilter { all, metadata, numeric, color }
+
+class _AdvancedFieldsSection extends StatefulWidget {
+  const _AdvancedFieldsSection({
+    required this.schema,
+    required this.state,
+    required this.colorDrafts,
+    required this.onRawFieldChanged,
+    required this.onColorDraftChanged,
+    required this.onColorCommit,
+    required this.onFieldSelected,
+  });
+
+  final GachaFieldSchema schema;
+  final GachaCharacterState state;
+  final Map<String, String> colorDrafts;
+  final Future<void> Function(String field, String rawValue) onRawFieldChanged;
+  final void Function(String field, String value) onColorDraftChanged;
+  final Future<void> Function(String field) onColorCommit;
+  final ValueChanged<String> onFieldSelected;
+
+  @override
+  State<_AdvancedFieldsSection> createState() => _AdvancedFieldsSectionState();
+}
+
+class _AdvancedFieldsSectionState extends State<_AdvancedFieldsSection> {
+  final TextEditingController _searchController = TextEditingController();
+  _AdvancedFieldFilter _filter = _AdvancedFieldFilter.all;
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final advancedDefinitions = advancedEditorDefinitions(widget.schema);
+    final query = _searchController.text.trim().toLowerCase();
+    final visible = advancedDefinitions
+        .where((definition) {
+          if (!_matchesAdvancedFilter(definition.kind, _filter)) {
+            return false;
+          }
+          if (query.isEmpty) {
+            return true;
+          }
+          return definition.field.toLowerCase().contains(query) ||
+              definition.subsystem.toLowerCase().contains(query) ||
+              _fieldKindLabel(definition.kind).toLowerCase().contains(query);
+        })
+        .toList(growable: false);
+    final groups = <String, List<GachaFieldDefinition>>{};
+    for (final definition in visible) {
+      groups.putIfAbsent(definition.subsystem, () => []).add(definition);
+    }
+
+    return _PanelCard(
+      title: 'Advanced Fields',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            '${advancedDefinitions.length} canonical fields not exposed in the primary controls. Values are committed exactly and are not clamped to renderer preview ranges.',
+          ),
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final narrow = constraints.maxWidth < 620;
+              final search = TextField(
+                controller: _searchController,
+                onChanged: (_) => setState(() {}),
+                decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.search),
+                  labelText: 'Search field or subsystem',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              );
+              final filter = DropdownButtonFormField<_AdvancedFieldFilter>(
+                initialValue: _filter,
+                decoration: const InputDecoration(
+                  labelText: 'Field type',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+                items: const [
+                  DropdownMenuItem(
+                    value: _AdvancedFieldFilter.all,
+                    child: Text('All fields'),
+                  ),
+                  DropdownMenuItem(
+                    value: _AdvancedFieldFilter.metadata,
+                    child: Text('Text'),
+                  ),
+                  DropdownMenuItem(
+                    value: _AdvancedFieldFilter.numeric,
+                    child: Text('Number'),
+                  ),
+                  DropdownMenuItem(
+                    value: _AdvancedFieldFilter.color,
+                    child: Text('Color'),
+                  ),
+                ],
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() => _filter = value);
+                  }
+                },
+              );
+              if (narrow) {
+                return Column(
+                  children: [search, const SizedBox(height: 10), filter],
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(child: search),
+                  const SizedBox(width: 10),
+                  SizedBox(width: 190, child: filter),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 12),
+          Text('${visible.length} field(s) shown'),
+          const SizedBox(height: 8),
+          if (groups.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: Text('No advanced fields match this filter.'),
+            )
+          else
+            for (final entry in groups.entries)
+              _AdvancedFieldGroup(
+                subsystem: entry.key,
+                definitions: entry.value,
+                schema: widget.schema,
+                state: widget.state,
+                colorDrafts: widget.colorDrafts,
+                onRawFieldChanged: widget.onRawFieldChanged,
+                onColorDraftChanged: widget.onColorDraftChanged,
+                onColorCommit: widget.onColorCommit,
+                onFieldSelected: widget.onFieldSelected,
+                expanded: query.isNotEmpty || groups.length == 1,
+              ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AdvancedFieldGroup extends StatelessWidget {
+  const _AdvancedFieldGroup({
+    required this.subsystem,
+    required this.definitions,
+    required this.schema,
+    required this.state,
+    required this.colorDrafts,
+    required this.onRawFieldChanged,
+    required this.onColorDraftChanged,
+    required this.onColorCommit,
+    required this.onFieldSelected,
+    required this.expanded,
+  });
+
+  final String subsystem;
+  final List<GachaFieldDefinition> definitions;
+  final GachaFieldSchema schema;
+  final GachaCharacterState state;
+  final Map<String, String> colorDrafts;
+  final Future<void> Function(String field, String rawValue) onRawFieldChanged;
+  final void Function(String field, String value) onColorDraftChanged;
+  final Future<void> Function(String field) onColorCommit;
+  final ValueChanged<String> onFieldSelected;
+  final bool expanded;
+
+  @override
+  Widget build(BuildContext context) {
+    return ExpansionTile(
+      key: ValueKey('$subsystem:$expanded'),
+      initiallyExpanded: expanded,
+      tilePadding: EdgeInsets.zero,
+      title: Text(_humanizeFieldName(subsystem)),
+      subtitle: Text('${definitions.length} field(s)'),
+      children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              for (final definition in definitions)
+                if (definition.kind == GachaFieldKind.color)
+                  _ColorFieldTile(
+                    field: definition.field,
+                    label: _humanizeFieldName(definition.field),
+                    currentHex: state
+                        .rawValue(schema, definition.field)
+                        .toUpperCase(),
+                    color: state.color(definition.field),
+                    draft: colorDrafts[definition.field],
+                    onDraftChanged: onColorDraftChanged,
+                    onCommit: onColorCommit,
+                    onFieldSelected: onFieldSelected,
+                  )
+                else
+                  _AdvancedRawFieldTile(
+                    definition: definition,
+                    rawValue: state.rawValue(schema, definition.field),
+                    onChanged: onRawFieldChanged,
+                    onFieldSelected: onFieldSelected,
+                  ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+      ],
+    );
+  }
+}
+
+class _AdvancedRawFieldTile extends StatefulWidget {
+  const _AdvancedRawFieldTile({
+    required this.definition,
+    required this.rawValue,
+    required this.onChanged,
+    required this.onFieldSelected,
+  });
+
+  final GachaFieldDefinition definition;
+  final String rawValue;
+  final Future<void> Function(String field, String rawValue) onChanged;
+  final ValueChanged<String> onFieldSelected;
+
+  @override
+  State<_AdvancedRawFieldTile> createState() => _AdvancedRawFieldTileState();
+}
+
+class _AdvancedRawFieldTileState extends State<_AdvancedRawFieldTile> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.rawValue,
+  );
+  String? _errorText;
+
+  @override
+  void didUpdateWidget(covariant _AdvancedRawFieldTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.rawValue != widget.rawValue &&
+        _controller.text == oldWidget.rawValue) {
+      _controller.text = widget.rawValue;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _apply() async {
+    final raw = _controller.text;
+    if (widget.definition.kind == GachaFieldKind.numeric &&
+        int.tryParse(raw) == null) {
+      setState(() => _errorText = 'Enter a whole number');
+      return;
+    }
+    if (widget.definition.kind == GachaFieldKind.metadata &&
+        raw.contains('|')) {
+      setState(() => _errorText = 'The | delimiter is not allowed');
+      return;
+    }
+    setState(() => _errorText = null);
+    widget.onFieldSelected(widget.definition.field);
+    await widget.onChanged(widget.definition.field, raw);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final definition = widget.definition;
+    return SizedBox(
+      width: definition.kind == GachaFieldKind.metadata ? 330 : 240,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border.all(color: const Color(0xFFB9C2CA)),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _humanizeFieldName(definition.field),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              Text(
+                '[${definition.index}] ${definition.field} · ${_fieldKindLabel(definition.kind)}',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _controller,
+                keyboardType: definition.kind == GachaFieldKind.numeric
+                    ? const TextInputType.numberWithOptions(signed: true)
+                    : TextInputType.text,
+                minLines: 1,
+                maxLines: definition.kind == GachaFieldKind.metadata ? 3 : 1,
+                onTap: () => widget.onFieldSelected(definition.field),
+                onSubmitted: (_) => _apply(),
+                decoration: InputDecoration(
+                  isDense: true,
+                  border: const OutlineInputBorder(),
+                  errorText: _errorText,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Align(
+                alignment: Alignment.centerRight,
+                child: FilledButton.tonal(
+                  onPressed: _apply,
+                  child: const Text('Apply'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+bool _matchesAdvancedFilter(GachaFieldKind kind, _AdvancedFieldFilter filter) {
+  return switch (filter) {
+    _AdvancedFieldFilter.all => true,
+    _AdvancedFieldFilter.metadata => kind == GachaFieldKind.metadata,
+    _AdvancedFieldFilter.numeric => kind == GachaFieldKind.numeric,
+    _AdvancedFieldFilter.color => kind == GachaFieldKind.color,
+  };
+}
+
+String _fieldKindLabel(GachaFieldKind kind) {
+  return switch (kind) {
+    GachaFieldKind.metadata => 'Text',
+    GachaFieldKind.numeric => 'Number',
+    GachaFieldKind.color => 'Color',
+  };
+}
+
+String _humanizeFieldName(String value) {
+  final spaced = value.replaceAll('_', ' ').replaceAllMapped(
+    RegExp(r'([a-z])([A-Z])'),
+    (match) {
+      return '${match.group(1)} ${match.group(2)}';
+    },
+  );
+  if (spaced.isEmpty) {
+    return value;
+  }
+  return '${spaced[0].toUpperCase()}${spaced.substring(1)}';
+}
+
+Set<String> _primaryEditorFieldNames() {
+  return {
+    for (final field in _bodyFields) field.field,
+    for (final field in _headFaceFields) field.field,
+    for (final field in _hairFields) field.field,
+    for (final field in _clothingFields) field.field,
+    for (final field in _accessoryFields) field.field,
+    for (final field in _propFields) field.field,
+    for (final field in _displayFields) field.field,
+    for (final group in _transformGroups)
+      for (final field in group.fields) field.field,
+    for (final group in _colorGroups)
+      for (final field in group.fields) field.field,
+  };
+}
+
+List<GachaFieldDefinition> advancedEditorDefinitions(GachaFieldSchema schema) {
+  final primaryFields = _primaryEditorFieldNames();
+  return schema.definitions
+      .where((definition) => !primaryFields.contains(definition.field))
+      .toList(growable: false);
 }
 
 class _PanelCard extends StatelessWidget {

@@ -13,6 +13,74 @@ class CsvLoaders {
     return parseCsv(raw);
   }
 
+  static Future<List<T>> loadAssetCsvMapped<T>(
+    String assetPath,
+    T Function(Map<String, String> row) convert,
+  ) async {
+    final raw = await rootBundle.loadString(assetPath);
+    return parseCsvMapped(raw, convert);
+  }
+
+  static List<T> parseCsvMapped<T>(
+    String raw,
+    T Function(Map<String, String> row) convert,
+  ) {
+    if (raw.isEmpty) return <T>[];
+    final output = <T>[];
+    List<String>? headers;
+    final fields = <String>[];
+    final field = StringBuffer();
+    var quoted = false;
+
+    void finishField() {
+      fields.add(field.toString().trim());
+      field.clear();
+    }
+
+    void finishRow() {
+      finishField();
+      if (headers == null) {
+        headers = [
+          for (final value in fields) value.replaceFirst('\ufeff', '').trim(),
+        ];
+      } else if (fields.any((value) => value.isNotEmpty)) {
+        final row = <String, String>{};
+        for (var index = 0; index < headers!.length; index++) {
+          row[headers![index]] = index < fields.length ? fields[index] : '';
+        }
+        output.add(convert(row));
+      }
+      fields.clear();
+    }
+
+    for (var index = 0; index < raw.length; index++) {
+      final code = raw.codeUnitAt(index);
+      if (code == 34) {
+        if (quoted &&
+            index + 1 < raw.length &&
+            raw.codeUnitAt(index + 1) == 34) {
+          field.writeCharCode(34);
+          index += 1;
+        } else {
+          quoted = !quoted;
+        }
+      } else if (code == 44 && !quoted) {
+        finishField();
+      } else if ((code == 10 || code == 13) && !quoted) {
+        if (code == 13 &&
+            index + 1 < raw.length &&
+            raw.codeUnitAt(index + 1) == 10) {
+          index += 1;
+        }
+        finishRow();
+      } else {
+        field.writeCharCode(code);
+      }
+    }
+    if (field.isNotEmpty || fields.isNotEmpty) finishRow();
+    return output;
+  }
+
   static Future<Map<String, dynamic>> loadJsonAsset(String assetPath) async {
     final raw = await rootBundle.loadString(assetPath);
     return jsonDecode(raw) as Map<String, dynamic>;

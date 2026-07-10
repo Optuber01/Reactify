@@ -34,6 +34,7 @@ class CharacterCreatorScreen extends StatefulWidget {
     this.onDuplicateLibraryCharacter,
     this.onRenameLibraryCharacter,
     this.onDeleteLibraryCharacter,
+    this.tablesLoader = ResolverTables.loadForEditor,
   });
 
   final Map<CharacterId, CharacterResource> characterLibrary;
@@ -45,6 +46,7 @@ class CharacterCreatorScreen extends StatefulWidget {
   onDuplicateLibraryCharacter;
   final void Function(CharacterId id, String name)? onRenameLibraryCharacter;
   final void Function(CharacterId id)? onDeleteLibraryCharacter;
+  final Future<ResolverTables> Function() tablesLoader;
 
   @override
   State<CharacterCreatorScreen> createState() => _CharacterCreatorScreenState();
@@ -52,8 +54,7 @@ class CharacterCreatorScreen extends StatefulWidget {
 
 class _CharacterCreatorScreenState extends State<CharacterCreatorScreen> {
   final GachaAssetStore _assetStore = GachaAssetStore();
-  late final Future<ResolverTables> _tablesFuture =
-      ResolverTables.loadForEditor();
+  late final Future<ResolverTables> _tablesFuture = widget.tablesLoader();
 
   @override
   Widget build(BuildContext context) {
@@ -63,7 +64,9 @@ class _CharacterCreatorScreenState extends State<CharacterCreatorScreen> {
           future: _tablesFuture,
           builder: (context, snapshot) {
             if (snapshot.connectionState != ConnectionState.done) {
-              return const Center(child: CircularProgressIndicator());
+              return _EditorStartup(
+                hasCharacters: widget.characterLibrary.isNotEmpty,
+              );
             }
             if (snapshot.hasError || snapshot.data == null) {
               return Center(
@@ -88,6 +91,47 @@ class _CharacterCreatorScreenState extends State<CharacterCreatorScreen> {
               onDeleteLibraryCharacter: widget.onDeleteLibraryCharacter,
             );
           },
+        ),
+      ),
+    );
+  }
+}
+
+class _EditorStartup extends StatelessWidget {
+  const _EditorStartup({required this.hasCharacters});
+
+  final bool hasCharacters;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 460),
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.person_add_alt_1_outlined, size: 52),
+              const SizedBox(height: 18),
+              Text(
+                hasCharacters
+                    ? 'Preparing the character editor'
+                    : 'Import your first character',
+                style: Theme.of(context).textTheme.headlineSmall,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                hasCharacters
+                    ? 'Your project is ready. Character rendering data is loading.'
+                    : 'Use a canonical Gacha Club code or a Reactify native character document. Import controls will appear as soon as rendering data is ready.',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 22),
+              const LinearProgressIndicator(),
+            ],
+          ),
         ),
       ),
     );
@@ -341,7 +385,59 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
   Widget build(BuildContext context) {
     final currentState = _currentState;
     if (currentState == null) {
-      return const Center(child: CircularProgressIndicator());
+      return Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 680),
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: _codeController,
+                  minLines: 5,
+                  maxLines: 9,
+                  decoration: const InputDecoration(
+                    labelText: 'Gacha Club 445-field code',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  alignment: WrapAlignment.center,
+                  children: [
+                    FilledButton(
+                      onPressed: _importFromTextarea,
+                      child: const Text('Import'),
+                    ),
+                    OutlinedButton(
+                      onPressed: _openGachaCodeFile,
+                      child: const Text('Open Code File'),
+                    ),
+                    OutlinedButton(
+                      onPressed: _openNativeJsonFile,
+                      child: const Text('Import Native JSON'),
+                    ),
+                  ],
+                ),
+                if (_messageText case final message?) ...[
+                  const SizedBox(height: 14),
+                  Text(
+                    message,
+                    style: TextStyle(
+                      color: _messageIsError
+                          ? Theme.of(context).colorScheme.error
+                          : null,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      );
     }
     final scene =
         _scene ??

@@ -471,11 +471,13 @@ class ResolverTables {
     final manifestJsonFuture = CsvLoaders.loadJsonAsset(
       'assets/data/generated/app_asset_manifest.json',
     );
-    final renderRowsFuture = CsvLoaders.loadAssetCsv(
+    final renderRowsFuture = CsvLoaders.loadAssetCsvMapped(
       'assets/data/generated/render_parts.csv',
+      RenderCatalogPart.fromRow,
     );
-    final renderExtraRowsFuture = CsvLoaders.loadAssetCsv(
+    final renderExtraRowsFuture = CsvLoaders.loadAssetCsvMapped(
       'assets/data/generated/render_parts_extras.csv',
+      RenderCatalogPart.fromRow,
     );
     final headPlacementRowsFuture = CsvLoaders.loadAssetCsv(
       'assets/data/swf-frame-placements/head_layout.csv',
@@ -546,10 +548,7 @@ class ResolverTables {
     _validateHeadPlacementRows(headPlacementRows);
     final schema = GachaFieldSchema.fromRows(schemaRows);
     final assetManifest = AppAssetManifest.fromJson(manifestJson);
-    final renderCatalog = [
-      ...renderRows,
-      ...renderExtraRows,
-    ].map(RenderCatalogPart.fromRow).toList(growable: true);
+    final renderCatalog = [...renderRows, ...renderExtraRows];
     final catalogByFamilyFrame = <String, Map<int, List<RenderCatalogPart>>>{};
     for (final part in renderCatalog) {
       final familyFrames = catalogByFamilyFrame.putIfAbsent(

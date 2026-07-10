@@ -6,7 +6,6 @@
 /*
 !.gitignore
 !.gitattributes
-!AGENTS.md
 
 # 2. Unignore only the Flutter app code directory
 !/app/
@@ -27,11 +26,12 @@
 /app/.idea/
 /app/*.iml
 /app/assets/gacha/
-/app/assets/data/generated/
+/app/assets/data/
 
 # 4. Explicitly ignore all tools, research, docs, and local scratch files
 /agent.md
 /agents.md
+/AGENTS.md
 /tools/
 /docs/
 /thoughts/

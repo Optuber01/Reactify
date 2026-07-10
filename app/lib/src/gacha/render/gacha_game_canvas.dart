@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 
@@ -196,17 +194,13 @@ class GachaGameCanvas extends FlameGame {
   }
 
   AffineMatrix _viewportTransform(ResolvedScene scene) {
-    final bounds = scene.worldBounds;
+    final bounds = scene.canvasBounds ?? scene.worldBounds;
     if (size.x <= 0 || size.y <= 0 || bounds.isEmpty) {
       return const AffineMatrix.identity();
     }
-    const padding = 32.0;
-    final availableWidth = (size.x - padding * 2).clamp(1.0, double.infinity);
-    final availableHeight = (size.y - padding * 2).clamp(1.0, double.infinity);
-    final fitScale = math.max(
-      0.01,
-      math.min(availableWidth / bounds.width, availableHeight / bounds.height),
-    );
+    final fitScale = (size.x / bounds.width < size.y / bounds.height)
+        ? size.x / bounds.width
+        : size.y / bounds.height;
     final cameraX =
         (size.x - bounds.width * fitScale) * 0.5 - bounds.left * fitScale;
     final cameraY =

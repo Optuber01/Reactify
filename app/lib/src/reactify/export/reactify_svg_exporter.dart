@@ -108,6 +108,7 @@ class ReactifySvgExporter {
     Map<String, String> inlineSvgById,
     Map<String, ReactifyAssetRef> manifestAssets,
   ) {
+    _validateSceneReferences(scene, characters);
     final buffer = StringBuffer()
       ..writeln(
         '<svg xmlns="http://www.w3.org/2000/svg" '
@@ -145,12 +146,51 @@ class ReactifySvgExporter {
       if (character == null) {
         continue;
       }
+      final warnings = character.metadata['renderWarnings'];
+      if (warnings is List && warnings.isNotEmpty) {
+        throw StateError(
+          'Character ${character.id} has unresolved active families: '
+          '${warnings.join('; ')}',
+        );
+      }
       _writeCharacter(buffer, sceneCharacter, character, inlineSvgById);
     }
     buffer
       ..writeln('</g>')
       ..writeln('</svg>');
     return buffer;
+  }
+
+  void _validateSceneReferences(
+    ReactifySceneDocument scene,
+    Map<String, ReactifyCharacterDocument> characters,
+  ) {
+    final background = scene.background;
+    if (background != null &&
+        background.visible &&
+        background.asset.uri.trim().isEmpty) {
+      throw StateError(
+        'Active scene background has no usable asset reference.',
+      );
+    }
+    for (final sceneCharacter in scene.characters) {
+      final character = characters[sceneCharacter.characterId];
+      if (character == null) {
+        throw StateError(
+          'Scene character ${sceneCharacter.id} references missing character '
+          '${sceneCharacter.characterId}.',
+        );
+      }
+      for (final slot in _effectiveSlots(character, sceneCharacter)) {
+        if (slot.kind != ReactifySlotKind.semantic &&
+            slot.visible &&
+            (slot.asset == null || slot.asset!.uri.trim().isEmpty)) {
+          throw StateError(
+            'Active family ${slot.family} (${slot.id}) has no usable asset reference.',
+          );
+        }
+      }
+    }
   }
 
   void _writeCharacter(

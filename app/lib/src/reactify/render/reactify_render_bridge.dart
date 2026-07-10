@@ -26,6 +26,12 @@ class ReactifyRenderBridge {
           entry.part.catalogPart.appAssetPath,
     };
     final assets = await assetStore.loadAll(assetPaths);
+    final missingAssets = assetPaths.difference(assets.keys.toSet());
+    if (missingAssets.isNotEmpty) {
+      throw StateError(
+        'Unable to render active assets: ${missingAssets.toList()..sort()}.',
+      );
+    }
     for (final entry in entries) {
       if (_isInlineDrawing(entry.asset)) {
         final cacheKey = _drawingCacheKey(entry.asset, entry.slot.metadata);
@@ -49,6 +55,7 @@ class ReactifyRenderBridge {
       assets: assets,
       worldBounds: _boundsForRenderableEntries(entries, assets),
       warnings: const [],
+      canvasBounds: Offset.zero & scene.canvasSize,
     );
   }
 
@@ -63,6 +70,12 @@ class ReactifyRenderBridge {
           part.catalogPart.appAssetPath,
     };
     final assets = await assetStore.loadAll(assetPaths);
+    final missingAssets = assetPaths.difference(assets.keys.toSet());
+    if (missingAssets.isNotEmpty) {
+      throw StateError(
+        'Unable to render active assets: ${missingAssets.toList()..sort()}.',
+      );
+    }
     return ResolvedScene(
       parts: parts,
       assets: assets,
@@ -76,15 +89,41 @@ class ReactifyRenderBridge {
     Map<String, ReactifyCharacterDocument> characters,
   ) {
     final entries = <ReactifyRenderableScenePart>[];
+    _validateSceneReferences(scene, characters);
+    final background = scene.background;
+    if (background != null && background.visible) {
+      final slot = ReactifySlot(
+        id: background.id,
+        family: 'background',
+        anchorId: 'scene',
+        localTransform: background.transform,
+        depth: -1,
+        visible: true,
+        asset: background.asset,
+      );
+      entries.add(
+        ReactifyRenderableScenePart(
+          slot: slot,
+          asset: background.asset,
+          part: ResolvedRenderPart(
+            catalogPart: _catalogPartFor(slot, background.asset),
+            localTransform: scene.cameraTransform.multiply(
+              background.transform,
+            ),
+            targetJoint: 'torso',
+            tintColor: null,
+            globalDepth: -1,
+          ),
+        ),
+      );
+    }
     final sceneDepths = {
       for (var index = 0; index < scene.characters.length; index++)
         scene.characters[index].id: index * 1000000000000,
     };
     for (final sceneCharacter in scene.characters) {
       final character = characters[sceneCharacter.characterId];
-      if (character == null) {
-        continue;
-      }
+      if (character == null) continue;
       final anchorWorld = _anchorWorldTransforms(character.rig);
       for (final slot in _effectiveSlots(character, sceneCharacter)) {
         final asset = slot.asset;
@@ -139,18 +178,34 @@ class ReactifyRenderBridge {
     Map<String, ReactifyCharacterDocument> characters,
   ) {
     final resolved = <ResolvedRenderPart>[];
-    for (final sceneCharacter in scene.characters) {
+    _validateSceneReferences(scene, characters);
+    for (
+      var characterIndex = 0;
+      characterIndex < scene.characters.length;
+      characterIndex++
+    ) {
+      final sceneCharacter = scene.characters[characterIndex];
       final character = characters[sceneCharacter.characterId];
-      if (character == null) {
-        continue;
-      }
-      resolved.addAll(
-        resolveCharacterParts(
-          character,
-          sceneCharacter,
-          scene.cameraTransform.multiply(sceneCharacter.transform),
-        ),
+      if (character == null) continue;
+      final characterParts = resolveCharacterParts(
+        character,
+        sceneCharacter,
+        scene.cameraTransform.multiply(sceneCharacter.transform),
       );
+      final depthBase = characterIndex * 1000000000000;
+      resolved.addAll([
+        for (final part in characterParts)
+          ResolvedRenderPart(
+            catalogPart: part.catalogPart,
+            localTransform: part.localTransform,
+            targetJoint: part.targetJoint,
+            tintColor: part.tintColor,
+            globalDepth: depthBase + part.globalDepth,
+            tintStrength: part.tintStrength,
+            opacity: part.opacity,
+            sceneTransform: part.sceneTransform,
+          ),
+      ]);
     }
     resolved.sort((left, right) {
       final depthCompare = left.globalDepth.compareTo(right.globalDepth);
@@ -158,6 +213,45 @@ class ReactifyRenderBridge {
       return left.catalogPart.leafId.compareTo(right.catalogPart.leafId);
     });
     return resolved;
+  }
+
+  void _validateSceneReferences(
+    ReactifySceneDocument scene,
+    Map<String, ReactifyCharacterDocument> characters,
+  ) {
+    final background = scene.background;
+    if (background != null &&
+        background.visible &&
+        background.asset.uri.trim().isEmpty) {
+      throw StateError(
+        'Active scene background has no usable asset reference.',
+      );
+    }
+    for (final sceneCharacter in scene.characters) {
+      final character = characters[sceneCharacter.characterId];
+      if (character == null) {
+        throw StateError(
+          'Scene character ${sceneCharacter.id} references missing character '
+          '${sceneCharacter.characterId}.',
+        );
+      }
+      final warnings = character.metadata['renderWarnings'];
+      if (warnings is List && warnings.isNotEmpty) {
+        throw StateError(
+          'Character ${character.id} has unresolved active families: '
+          '${warnings.join('; ')}',
+        );
+      }
+      for (final slot in _effectiveSlots(character, sceneCharacter)) {
+        if (slot.kind != ReactifySlotKind.semantic &&
+            slot.visible &&
+            (slot.asset == null || slot.asset!.uri.trim().isEmpty)) {
+          throw StateError(
+            'Active family ${slot.family} (${slot.id}) has no usable asset reference.',
+          );
+        }
+      }
+    }
   }
 
   List<ResolvedRenderPart> resolveCharacterParts(

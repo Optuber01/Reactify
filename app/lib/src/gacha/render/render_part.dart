@@ -54,12 +54,14 @@ class ResolvedScene {
     required this.assets,
     required this.worldBounds,
     required this.warnings,
+    this.canvasBounds,
   });
 
   final List<ResolvedRenderPart> parts;
   final Map<String, PreparedAsset> assets;
   final Rect worldBounds;
   final List<String> warnings;
+  final Rect? canvasBounds;
 }
 
 abstract class PreparedAsset {

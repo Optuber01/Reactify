@@ -25,6 +25,56 @@ class CharacterRenderer {
   final HeadRenderer headRenderer;
   final BodyRenderer bodyRenderer;
 
+  static const Map<String, Set<String>> sourceSelectorFamilies = {
+    'fronthair': {'front_hair'},
+    'rearhair': {'rear_hair'},
+    'backhair': {'back_hair'},
+    'ponytail': {'ponytail'},
+    'ahoge': {'ahoge'},
+    'eyes1x': {'left_eye'},
+    'eyes2x': {'right_eye'},
+    'eyebrows1x': {'left_eyebrow'},
+    'eyebrows2x': {'right_eyebrow'},
+    'pupil1x': {'left_eye'},
+    'pupil2x': {'right_eye'},
+    'mouth': {'mouth'},
+    'glasses': {'glasses'},
+    'accessory1x': {'accessory1'},
+    'accessory2x': {'accessory2'},
+    'accessory3x': {'accessory3'},
+    'hat': {'hat'},
+    'other1x': {'other1'},
+    'other2x': {'other2'},
+    'other3x': {'other3'},
+    'other4x': {'other4'},
+    'shirt': {'body_shirt', 'belt_shirt'},
+    'shirtex': {'body_jacket', 'belt_jacket'},
+    'sleeves1x': {'upper_sleeve_front', 'lower_sleeve_front'},
+    'sleeves2x': {'upper_sleeve_back', 'lower_sleeve_back'},
+    'pants1x': {'body_pants', 'thigh_pants_front', 'foot_pants_front'},
+    'pants2x': {'thigh_pants_back', 'foot_pants_back'},
+    'socks1x': {'thigh_socks_front', 'foot_socks_front'},
+    'socks2x': {'thigh_socks_back', 'foot_socks_back'},
+    'shoes1x': {'shoe_front'},
+    'shoes2x': {'shoe_back'},
+    'belt1x': {'belt1'},
+    'belt2x': {'belt2'},
+    'gloves1x': {'glove_front'},
+    'gloves2x': {'glove_back'},
+    'wrist1x': {'wrist_front'},
+    'wrist2x': {'wrist_back'},
+    'cape': {'cape'},
+    'scarf1x': {'scarf1'},
+    'scarf2x': {'scarf2'},
+    'wings1x': {'wings1'},
+    'wings2x': {'wings2'},
+    'tail': {'tail'},
+    'shoulder1x': {'shoulder_front'},
+    'shoulder2x': {'shoulder_back'},
+    'weapon1x': {'weapon_front'},
+    'weapon2x': {'weapon_back'},
+  };
+
   Future<ResolvedScene> buildScene(GachaCharacterState state) async {
     final resolvedParts = resolveParts(state);
     final assets = await assetStore.loadAll(
@@ -35,7 +85,7 @@ class CharacterRenderer {
       parts: resolvedParts,
       assets: assets,
       worldBounds: worldBounds,
-      warnings: _warningsFor(state, resolvedParts),
+      warnings: warningsFor(state, resolvedParts),
     );
   }
 
@@ -746,7 +796,7 @@ class CharacterRenderer {
     return null;
   }
 
-  List<String> _warningsFor(
+  List<String> warningsFor(
     GachaCharacterState state,
     List<ResolvedRenderPart> parts,
   ) {
@@ -758,6 +808,36 @@ class CharacterRenderer {
     if (normalizedPose != state.numeric('pose')) {
       warnings.add(
         'Pose ${state.numeric('pose')} was normalized to supported runtime pose $normalizedPose.',
+      );
+    }
+    for (final definition in tables.schema.definitions.where(
+      (definition) => definition.subsystem == 'part_slots',
+    )) {
+      final field = definition.field;
+      final value = state.numeric(field);
+      if (value <= 0) continue;
+      final candidateFamilies = sourceSelectorFamilies[field];
+      if (candidateFamilies == null) continue;
+      final candidates = tables.renderCatalog.where(
+        (part) => candidateFamilies.contains(part.family),
+      );
+      if (!candidates.any(
+        (part) => TintPipeline.evaluateVisibility(part.visibilityRule, state),
+      )) {
+        continue;
+      }
+      if (candidateFamilies.any(
+        (family) => tables.partsFor(family, value).isNotEmpty,
+      )) {
+        continue;
+      }
+      final range = tables.editorValueRanges[field];
+      final status = range != null && value > range.maxValue
+          ? 'out_of_range'
+          : 'unsupported';
+      warnings.add(
+        'unresolved_active_family:$status:$field:$value:'
+        '${candidateFamilies.toList()..sort()}',
       );
     }
     return warnings;

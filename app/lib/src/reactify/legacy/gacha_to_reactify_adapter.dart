@@ -12,6 +12,7 @@ class GachaToReactifyAdapter {
 
   ReactifyCharacterDocument migrate(GachaCharacterState state, {String? id}) {
     final parts = renderer.resolveParts(state);
+    final warnings = renderer.warningsFor(state, parts);
     final leafSlots = [for (final part in parts) _slotForPart(state, part)];
     return ReactifyCharacterDocument(
       id: id ?? _stableCharacterId(state),
@@ -22,6 +23,7 @@ class GachaToReactifyAdapter {
         'source': 'gacha_445',
         'pose': state.numeric('pose'),
         'headlayer': state.numeric('headlayer'),
+        if (warnings.isNotEmpty) 'renderWarnings': warnings,
       },
       slots: [..._semanticSlotsFor(leafSlots), ...leafSlots],
     );

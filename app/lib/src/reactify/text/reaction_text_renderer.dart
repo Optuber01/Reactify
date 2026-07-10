@@ -19,9 +19,16 @@ class ReactionTextRenderLine {
 }
 
 class ReactionTextLayout {
-  const ReactionTextLayout({required this.size, required this.lines});
+  const ReactionTextLayout({
+    required this.size,
+    required this.textMaxWidth,
+    required this.textDirection,
+    required this.lines,
+  });
 
   final Size size;
+  final double textMaxWidth;
+  final TextDirection textDirection;
   final List<ReactionTextRenderLine> lines;
 }
 
@@ -54,6 +61,9 @@ class ReactionTextBlockRenderer {
       ));
     }
 
+    final insets = _effectInsets(resolved.map((item) => item.style));
+    final textMaxWidth = (maxWidth - insets.horizontal).clamp(1.0, maxWidth);
+
     final measured =
         <({ReactionDialogueLine line, ReactionTextStyle style, Size size})>[];
     var totalHeight = 0.0;
@@ -63,42 +73,45 @@ class ReactionTextBlockRenderer {
         item.style,
         textDirection,
         foreground: _fillPaint(item.style),
-      )..layout(maxWidth: maxWidth);
-      final spacing =
-          (item.style.fontSize ?? 42) *
-          ((item.style.lineSpacing ?? 1.1) - 1).clamp(0, 4);
-      final size = Size(painter.width, painter.height + spacing);
+      )..layout(maxWidth: textMaxWidth);
+      final size = painter.size;
       measured.add((line: item.line, style: item.style, size: size));
       totalHeight += size.height;
     }
 
     final placed = <ReactionTextRenderLine>[];
-    var y = 0.0;
+    var y = insets.top;
     for (final item in measured) {
-      final x = switch (item.style.alignment ?? ReactionTextAlign.center) {
+      final textX = switch (item.style.alignment ?? ReactionTextAlign.center) {
         ReactionTextAlign.left => 0.0,
-        ReactionTextAlign.center => (maxWidth - item.size.width) / 2,
-        ReactionTextAlign.right => maxWidth - item.size.width,
+        ReactionTextAlign.center => (textMaxWidth - item.size.width) / 2,
+        ReactionTextAlign.right => textMaxWidth - item.size.width,
       };
       placed.add(
         ReactionTextRenderLine(
           line: item.line,
           style: item.style,
-          offset: Offset(x, y),
+          offset: Offset(insets.left + textX, y),
           size: item.size,
         ),
       );
       y += item.size.height;
     }
-    return ReactionTextLayout(size: Size(maxWidth, totalHeight), lines: placed);
+    return ReactionTextLayout(
+      size: Size(maxWidth, insets.top + totalHeight + insets.bottom),
+      textMaxWidth: textMaxWidth,
+      textDirection: textDirection,
+      lines: placed,
+    );
   }
 
   void paint(
     Canvas canvas,
     ReactionTextLayout layout, {
     Offset offset = Offset.zero,
-    TextDirection textDirection = TextDirection.ltr,
+    TextDirection? textDirection,
   }) {
+    final direction = textDirection ?? layout.textDirection;
     for (final entry in layout.lines) {
       final position = offset + entry.offset;
       final glowSize = entry.style.glowSize ?? 0;
@@ -107,10 +120,10 @@ class ReactionTextBlockRenderer {
         final glow = _painter(
           entry.line.text,
           entry.style,
-          textDirection,
+          direction,
           foreground: Paint()..color = glowColor,
           shadows: [Shadow(color: glowColor, blurRadius: glowSize)],
-        )..layout(maxWidth: layout.size.width);
+        )..layout(maxWidth: layout.textMaxWidth);
         glow.paint(canvas, position);
       }
 
@@ -120,24 +133,23 @@ class ReactionTextBlockRenderer {
         final outline = _painter(
           entry.line.text,
           entry.style,
-          textDirection,
+          direction,
           foreground: Paint()
             ..style = PaintingStyle.stroke
             ..strokeJoin = StrokeJoin.round
             ..strokeWidth = outlineWidth * 2
             ..color = outlineColor,
-          shadows: _shadows(entry.style),
-        )..layout(maxWidth: layout.size.width);
+        )..layout(maxWidth: layout.textMaxWidth);
         outline.paint(canvas, position);
       }
 
       final fill = _painter(
         entry.line.text,
         entry.style,
-        textDirection,
+        direction,
         foreground: _fillPaint(entry.style),
         shadows: _shadows(entry.style),
-      )..layout(maxWidth: layout.size.width);
+      )..layout(maxWidth: layout.textMaxWidth);
       fill.paint(canvas, position);
     }
   }
@@ -146,12 +158,17 @@ class ReactionTextBlockRenderer {
     required ReactionTextLayout layout,
     double pixelRatio = 1,
     Color background = const Color(0x00000000),
-    TextDirection textDirection = TextDirection.ltr,
+    TextDirection? textDirection,
   }) async {
     final recorder = ui.PictureRecorder();
     final canvas = Canvas(recorder);
-    final width = (layout.size.width * pixelRatio).ceil().clamp(1, 16384);
-    final height = (layout.size.height * pixelRatio).ceil().clamp(1, 16384);
+    final width = (layout.size.width * pixelRatio).ceil();
+    final height = (layout.size.height * pixelRatio).ceil();
+    if (width < 1 || height < 1 || width > 16384 || height > 16384) {
+      throw RangeError(
+        'Rendered text image must be between 1 and 16384 pixels per axis.',
+      );
+    }
     canvas.scale(pixelRatio);
     if (background.a > 0) {
       canvas.drawRect(Offset.zero & layout.size, Paint()..color = background);
@@ -178,7 +195,7 @@ class ReactionTextBlockRenderer {
           fontWeight: _fontWeight(style.fontWeight),
           fontStyle: style.italic == true ? FontStyle.italic : FontStyle.normal,
           letterSpacing: style.tracking,
-          height: 1,
+          height: style.lineSpacing,
           foreground: foreground,
           shadows: shadows,
         ),
@@ -204,6 +221,31 @@ class ReactionTextBlockRenderer {
       ),
     ];
   }
+
+  EdgeInsets _effectInsets(Iterable<ReactionTextStyle> styles) {
+    var left = 0.0;
+    var top = 0.0;
+    var right = 0.0;
+    var bottom = 0.0;
+    for (final style in styles) {
+      final outline = (style.outlineWidth ?? 0)
+          .clamp(0, double.infinity)
+          .toDouble();
+      final glow =
+          (style.glowSize ?? 0).clamp(0, double.infinity).toDouble() * 2;
+      final softness =
+          (style.shadowSoftness ?? 0).clamp(0, double.infinity).toDouble() * 2;
+      final shadowX = style.shadowOffsetX ?? 0;
+      final shadowY = style.shadowOffsetY ?? 0;
+      left = [left, outline, glow, softness - shadowX].reduce(_max);
+      right = [right, outline, glow, softness + shadowX].reduce(_max);
+      top = [top, outline, glow, softness - shadowY].reduce(_max);
+      bottom = [bottom, outline, glow, softness + shadowY].reduce(_max);
+    }
+    return EdgeInsets.fromLTRB(left, top, right, bottom);
+  }
+
+  double _max(double a, double b) => a > b ? a : b;
 
   TextAlign _textAlign(ReactionTextAlign? alignment) {
     return switch (alignment ?? ReactionTextAlign.center) {
@@ -231,14 +273,27 @@ class ReactionTextPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox.fromSize(
-      size: layout.size,
-      child: CustomPaint(
-        painter: _ReactionTextPainter(
-          renderer: const ReactionTextBlockRenderer(),
-          layout: layout,
-          background: background,
-          textDirection: Directionality.of(context),
+    final label = layout.lines
+        .map(
+          (entry) => entry.line.speakerId == null
+              ? entry.line.text
+              : '${entry.line.speakerId}: ${entry.line.text}',
+        )
+        .join('\n');
+    return Semantics(
+      container: true,
+      label: label,
+      child: ExcludeSemantics(
+        child: SizedBox.fromSize(
+          size: layout.size,
+          child: CustomPaint(
+            painter: _ReactionTextPainter(
+              renderer: const ReactionTextBlockRenderer(),
+              layout: layout,
+              background: background,
+              textDirection: layout.textDirection,
+            ),
+          ),
         ),
       ),
     );

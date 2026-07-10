@@ -112,11 +112,16 @@ class ReactionTextStyle {
   factory ReactionTextStyle.fromJson(Map<String, Object?> json) {
     T? enumValue<T extends Enum>(List<T> values, Object? value) {
       if (value == null) return null;
-      return values.where((item) => item.name == value).firstOrNull;
+      if (value is! String) {
+        throw FormatException('Expected an enum name, got $value.');
+      }
+      final match = values.where((item) => item.name == value).firstOrNull;
+      if (match == null) throw FormatException('Unknown enum value "$value".');
+      return match;
     }
 
     double? number(String key) => (json[key] as num?)?.toDouble();
-    return ReactionTextStyle(
+    final style = ReactionTextStyle(
       fontFamily: json['fontFamily'] as String?,
       fontSize: number('fontSize'),
       fontWeight: (json['fontWeight'] as num?)?.toInt(),
@@ -139,6 +144,43 @@ class ReactionTextStyle {
         json['capitalization'],
       ),
     );
+    style.validate();
+    return style;
+  }
+
+  void validate() {
+    void finitePositive(String name, double? value, {bool allowZero = true}) {
+      if (value == null) return;
+      if (!value.isFinite || value < 0 || (!allowZero && value == 0)) {
+        throw FormatException('Invalid $name value $value.');
+      }
+    }
+
+    finitePositive('fontSize', fontSize, allowZero: false);
+    finitePositive('outlineWidth', outlineWidth);
+    finitePositive('shadowSoftness', shadowSoftness);
+    finitePositive('glowSize', glowSize);
+    finitePositive('lineSpacing', lineSpacing, allowZero: false);
+    if (fontWeight != null && (fontWeight! < 100 || fontWeight! > 900)) {
+      throw FormatException('Font weight must be between 100 and 900.');
+    }
+    if (shadowOpacity != null &&
+        (!shadowOpacity!.isFinite ||
+            shadowOpacity! < 0 ||
+            shadowOpacity! > 1)) {
+      throw FormatException('Shadow opacity must be between 0 and 1.');
+    }
+    for (final entry in {
+      'fillColor': fillColor,
+      'outlineColor': outlineColor,
+      'shadowColor': shadowColor,
+      'glowColor': glowColor,
+    }.entries) {
+      final color = entry.value;
+      if (color != null && (color < 0 || color > 0xffffffff)) {
+        throw FormatException('Invalid ${entry.key} value $color.');
+      }
+    }
   }
 }
 
@@ -271,15 +313,45 @@ class ReactionDialogueLine {
 }
 
 class ReactionDialogueDocument {
-  const ReactionDialogueDocument({required this.lines, required this.issues});
+  const ReactionDialogueDocument({
+    required this.lines,
+    required this.issues,
+    this.schemaVersion = 1,
+  });
 
+  final int schemaVersion;
   final List<ReactionDialogueLine> lines;
   final List<ReactionDialogueIssue> issues;
 
   Map<String, Object?> toJson() => {
+    'schemaVersion': schemaVersion,
     'lines': lines.map((line) => line.toJson()).toList(),
     'issues': issues.map((issue) => issue.toJson()).toList(),
   };
+
+  factory ReactionDialogueDocument.fromJson(Map<String, Object?> json) {
+    final version = (json['schemaVersion'] as num?)?.toInt() ?? 1;
+    if (version != 1) {
+      throw FormatException('Unsupported dialogue schema version $version.');
+    }
+    return ReactionDialogueDocument(
+      schemaVersion: version,
+      lines: (json['lines'] as List)
+          .map(
+            (value) => ReactionDialogueLine.fromJson(
+              Map<String, Object?>.from(value as Map),
+            ),
+          )
+          .toList(),
+      issues: (json['issues'] as List? ?? const [])
+          .map(
+            (value) => ReactionDialogueIssue.fromJson(
+              Map<String, Object?>.from(value as Map),
+            ),
+          )
+          .toList(),
+    );
+  }
 }
 
 enum ReactionDialogueIssueKind { unknownSpeaker, duplicateAlias }
@@ -303,6 +375,22 @@ class ReactionDialogueIssue {
     'message': message,
     'token': token,
   };
+
+  factory ReactionDialogueIssue.fromJson(Map<String, Object?> json) {
+    final kindName = json['kind'];
+    final kind = ReactionDialogueIssueKind.values
+        .where((value) => value.name == kindName)
+        .firstOrNull;
+    if (kind == null) {
+      throw FormatException('Unknown dialogue issue kind "$kindName".');
+    }
+    return ReactionDialogueIssue(
+      kind: kind,
+      lineIndex: (json['lineIndex'] as num).toInt(),
+      message: json['message'] as String,
+      token: json['token'] as String?,
+    );
+  }
 }
 
 class ReactionDialogueParser {
@@ -349,6 +437,7 @@ class ReactionDialogueParser {
         text = source.substring(separator + 1).trimLeft();
         speakerId = tokenMap[_normalizeToken(prefix)];
         if (speakerId == null) {
+          text = source.trim();
           issues.add(
             ReactionDialogueIssue(
               kind: ReactionDialogueIssueKind.unknownSpeaker,

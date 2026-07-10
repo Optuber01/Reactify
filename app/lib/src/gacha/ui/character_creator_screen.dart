@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:ui';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -359,11 +360,14 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
                       selectedField: _selectedField,
                       hideNativeHair: _hideNativeHair,
                       onImportPressed: _importFromTextarea,
+                      onOpenCodeFilePressed: _openGachaCodeFile,
+                      onSaveCodeFilePressed: _saveGachaCodeFile,
                       onExportPressed: _exportCurrentState,
                       onExportNativeSvgPressed: _exportNativeSvg,
                       onExportNativePngPressed: _exportNativePng,
                       onExportNativeJsonPressed: _exportNativeJson,
                       onImportNativeJsonPressed: _importNativeJson,
+                      onOpenNativeJsonFilePressed: _openNativeJsonFile,
                       onResetToFixturePressed: _resetToSelectedFixture,
                       onResetToBaselinePressed: _resetToBaseline,
                       onNativeHairOverrideChanged: _toggleNativeHairOverride,
@@ -420,6 +424,51 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
       _codeController.text,
       baselineLabel: 'custom_import',
       successMessage: 'Imported 445-field code from the editor buffer.',
+    );
+  }
+
+  Future<void> _openGachaCodeFile() async {
+    final result = await FilePicker.pickFiles(
+      dialogTitle: 'Open Gacha Club character code',
+      type: FileType.custom,
+      allowedExtensions: const ['txt', 'gc'],
+      withData: true,
+      allowMultiple: false,
+      lockParentWindow: true,
+    );
+    final bytes = result?.files.single.bytes;
+    if (bytes == null) return;
+    final code = utf8.decode(bytes).trim();
+    _codeController.text = code;
+    await _adoptCode(
+      code,
+      baselineLabel: result!.files.single.name,
+      successMessage: 'Opened ${result.files.single.name}.',
+    );
+  }
+
+  Future<void> _openNativeJsonFile() async {
+    final result = await FilePicker.pickFiles(
+      dialogTitle: 'Open Reactify character scene',
+      type: FileType.custom,
+      allowedExtensions: const ['json', 'reactify'],
+      withData: true,
+      allowMultiple: false,
+      lockParentWindow: true,
+    );
+    final bytes = result?.files.single.bytes;
+    if (bytes == null) return;
+    _codeController.text = utf8.decode(bytes);
+    await _importNativeJson();
+  }
+
+  Future<void> _saveGachaCodeFile() async {
+    final currentState = _currentState;
+    if (currentState == null) return;
+    await _saveBytes(
+      fileName: '${_exportFileStem()}.gc.txt',
+      allowedExtensions: const ['txt'],
+      bytes: Uint8List.fromList(utf8.encode(currentState.serializeCode())),
     );
   }
 
@@ -485,6 +534,11 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
         editor.characters,
       );
       _codeController.text = package.svg;
+      await _saveBytes(
+        fileName: '${_exportFileStem()}.svg',
+        allowedExtensions: const ['svg'],
+        bytes: Uint8List.fromList(utf8.encode(package.svg)),
+      );
       setState(() {
         _messageText =
             'Exported editable native SVG with ${package.assets.length} asset references to the editor buffer.';
@@ -508,6 +562,11 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
         bridge: _reactifyBridge,
       ).exportScene(editor.scene, editor.characters);
       _codeController.text = 'data:image/png;base64,${base64Encode(bytes)}';
+      await _saveBytes(
+        fileName: '${_exportFileStem()}.png',
+        allowedExtensions: const ['png'],
+        bytes: bytes,
+      );
       setState(() {
         _messageText = 'Exported native PNG data URI to the editor buffer.';
         _messageIsError = false;
@@ -520,18 +579,46 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
     }
   }
 
-  void _exportNativeJson() {
+  Future<void> _exportNativeJson() async {
     final editor = _nativeEditor;
     if (editor == null) {
       return;
     }
-    _codeController.text = const JsonEncoder.withIndent(
-      '  ',
-    ).convert(editor.toJson());
+    final json = const JsonEncoder.withIndent('  ').convert(editor.toJson());
+    _codeController.text = json;
+    await _saveBytes(
+      fileName: '${_exportFileStem()}.reactify.json',
+      allowedExtensions: const ['json'],
+      bytes: Uint8List.fromList(utf8.encode(json)),
+    );
     setState(() {
       _messageText = 'Exported native scene JSON to the editor buffer.';
       _messageIsError = false;
     });
+  }
+
+  Future<String?> _saveBytes({
+    required String fileName,
+    required List<String> allowedExtensions,
+    required Uint8List bytes,
+  }) {
+    return FilePicker.saveFile(
+      dialogTitle: 'Save Reactify export',
+      fileName: fileName,
+      type: FileType.custom,
+      allowedExtensions: allowedExtensions,
+      bytes: bytes,
+      lockParentWindow: true,
+    );
+  }
+
+  String _exportFileStem() {
+    final source = _baselineLabel.trim().isEmpty ? 'character' : _baselineLabel;
+    final normalized = source
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+        .replaceAll(RegExp(r'^-+|-+$'), '');
+    return normalized.isEmpty ? 'character' : normalized;
   }
 
   Future<void> _importNativeJson() async {
@@ -1730,11 +1817,14 @@ class _EditorInspector extends StatelessWidget {
     required this.selectedField,
     required this.hideNativeHair,
     required this.onImportPressed,
+    required this.onOpenCodeFilePressed,
+    required this.onSaveCodeFilePressed,
     required this.onExportPressed,
     required this.onExportNativeSvgPressed,
     required this.onExportNativePngPressed,
     required this.onExportNativeJsonPressed,
     required this.onImportNativeJsonPressed,
+    required this.onOpenNativeJsonFilePressed,
     required this.onResetToFixturePressed,
     required this.onResetToBaselinePressed,
     required this.onNativeHairOverrideChanged,
@@ -1765,11 +1855,14 @@ class _EditorInspector extends StatelessWidget {
   final String? selectedField;
   final bool hideNativeHair;
   final VoidCallback onImportPressed;
+  final VoidCallback onOpenCodeFilePressed;
+  final VoidCallback onSaveCodeFilePressed;
   final VoidCallback onExportPressed;
   final VoidCallback onExportNativeSvgPressed;
   final VoidCallback onExportNativePngPressed;
   final VoidCallback onExportNativeJsonPressed;
   final VoidCallback onImportNativeJsonPressed;
+  final VoidCallback onOpenNativeJsonFilePressed;
   final VoidCallback onResetToFixturePressed;
   final VoidCallback onResetToBaselinePressed;
   final ValueChanged<bool> onNativeHairOverrideChanged;
@@ -1829,6 +1922,16 @@ class _EditorInspector extends StatelessWidget {
                       onPressed: onImportPressed,
                       child: const Text('Import'),
                     ),
+                    OutlinedButton.icon(
+                      onPressed: onOpenCodeFilePressed,
+                      icon: const Icon(Icons.folder_open),
+                      label: const Text('Open Code File'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: onSaveCodeFilePressed,
+                      icon: const Icon(Icons.save_alt),
+                      label: const Text('Save Code File'),
+                    ),
                     OutlinedButton(
                       onPressed: onExportPressed,
                       child: const Text('Export To Buffer'),
@@ -1848,6 +1951,11 @@ class _EditorInspector extends StatelessWidget {
                     OutlinedButton(
                       onPressed: onImportNativeJsonPressed,
                       child: const Text('Import Native JSON'),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: onOpenNativeJsonFilePressed,
+                      icon: const Icon(Icons.folder_open),
+                      label: const Text('Open Native JSON'),
                     ),
                     OutlinedButton(
                       onPressed: onResetToFixturePressed,

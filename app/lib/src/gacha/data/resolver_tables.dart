@@ -159,6 +159,28 @@ int? _parseOptionalInt(String? raw) {
   return int.parse(raw);
 }
 
+void _validateHeadPlacementRows(List<Map<String, String>> rows) {
+  for (var frame = 1; frame <= 4; frame++) {
+    final frameRows = rows.where(
+      (row) => int.tryParse(row['frame'] ?? '') == frame,
+    );
+    if (frameRows.length != 21) {
+      throw StateError(
+        'Expected 21 head placements for frame $frame, got ${frameRows.length}.',
+      );
+    }
+    final activeCount = frameRows
+        .where((row) => int.tryParse(row['character_id'] ?? '') != 0)
+        .length;
+    final expectedActiveCount = frame == 4 ? 0 : 21;
+    if (activeCount != expectedActiveCount) {
+      throw StateError(
+        'Expected $expectedActiveCount active head placements for frame $frame, got $activeCount.',
+      );
+    }
+  }
+}
+
 class FacePresetRule {
   const FacePresetRule({
     required this.facepreset,
@@ -337,6 +359,23 @@ String _prettyFixtureLabel(String id) {
       .join(' ');
 }
 
+class HeadPlacementKey {
+  const HeadPlacementKey({required this.frame, required this.name});
+
+  final int frame;
+  final String name;
+
+  @override
+  bool operator ==(Object other) {
+    return other is HeadPlacementKey &&
+        other.frame == frame &&
+        other.name == name;
+  }
+
+  @override
+  int get hashCode => Object.hash(frame, name);
+}
+
 class PosePlacementKey {
   const PosePlacementKey._({
     required this.page,
@@ -403,7 +442,7 @@ class ResolverTables {
   final AppAssetManifest assetManifest;
   final List<RenderCatalogPart> renderCatalog;
   final Map<String, Map<int, List<RenderCatalogPart>>> catalogByFamilyFrame;
-  final Map<String, HostPlacement> headPlacements;
+  final Map<HeadPlacementKey, HostPlacement> headPlacements;
   final Map<String, Map<int, HostPlacement>> headFlipPlacements;
   final Map<int, HostPlacement> logoPlacements;
   final Map<PosePlacementKey, HostPlacement> posePlacements;
@@ -504,6 +543,7 @@ class ResolverTables {
     final transformAnchorRows = await transformAnchorRowsFuture;
     final compositeSlotRows = await compositeSlotRowsFuture;
 
+    _validateHeadPlacementRows(headPlacementRows);
     final schema = GachaFieldSchema.fromRows(schemaRows);
     final assetManifest = AppAssetManifest.fromJson(manifestJson);
     final renderCatalog = [
@@ -521,7 +561,9 @@ class ResolverTables {
     }
     final headPlacements = {
       for (final row in headPlacementRows)
-        row['name']!: HostPlacement.fromRow(row),
+        if (int.tryParse(row['character_id'] ?? '') != 0)
+          HeadPlacementKey(frame: int.parse(row['frame']!), name: row['name']!):
+              HostPlacement.fromRow(row),
     };
     final headFlipPlacements = <String, Map<int, HostPlacement>>{};
     for (final row in headFlipPlacementRows) {
@@ -650,6 +692,26 @@ class ResolverTables {
       return null;
     }
     return logoPlacements[logopos] ?? logoPlacements[1];
+  }
+
+  HostPlacement? headPlacementFor({
+    required int headlayer,
+    required String name,
+  }) {
+    return headPlacements[HeadPlacementKey(
+      frame: normalizeHeadlayer(headlayer),
+      name: name,
+    )];
+  }
+
+  int normalizeHeadlayer(int headlayer) {
+    if (headlayer == 4) {
+      return 4;
+    }
+    if (headlayer < 1 || headlayer > 3) {
+      return 1;
+    }
+    return headlayer;
   }
 
   HostPlacement? headFlipPlacementFor({

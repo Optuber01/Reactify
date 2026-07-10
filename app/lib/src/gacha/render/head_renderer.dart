@@ -72,7 +72,14 @@ class HeadRenderer {
     parts.addAll(eyeRenderer.resolve(state, tables));
     return [
       for (final part in parts)
-        if (TintPipeline.evaluateVisibility(part.visibilityRule, state)) part,
+        if (TintPipeline.evaluateVisibility(part.visibilityRule, state) &&
+            (part.hostScope != 'head' ||
+                tables.headPlacementFor(
+                      headlayer: state.numeric('headlayer'),
+                      name: part.hostName,
+                    ) !=
+                    null))
+          part,
     ];
   }
 }

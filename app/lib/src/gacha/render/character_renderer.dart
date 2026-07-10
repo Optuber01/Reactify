@@ -87,8 +87,16 @@ class CharacterRenderer {
   ) {
     final groupMatrix = _groupAdjustmentFor(part, state);
     final headPlacement = part.hostScope == 'head'
-        ? tables.headPlacements[part.hostName]
+        ? tables.headPlacementFor(
+            headlayer: state.numeric('headlayer'),
+            name: part.hostName,
+          )
         : null;
+    if (part.hostScope == 'head' && headPlacement == null) {
+      throw StateError(
+        'Missing head placement for ${part.hostName} at headlayer ${state.numeric('headlayer')}.',
+      );
+    }
     final hostMatrix = headPlacement?.matrix ?? const AffineMatrix.identity();
     final anchorMatrix = part.hostScope == 'pose'
         ? AffineMatrix.translation(part.runtimeAnchorX, part.runtimeAnchorY)
@@ -111,7 +119,16 @@ class CharacterRenderer {
             ?.depth ??
         0;
     if (part.hostScope == 'head') {
-      final headDepth = tables.headPlacements[part.hostName]?.depth ?? 0;
+      final headPlacement = tables.headPlacementFor(
+        headlayer: state.numeric('headlayer'),
+        name: part.hostName,
+      );
+      if (headPlacement == null) {
+        throw StateError(
+          'Missing head placement for ${part.hostName} at headlayer ${state.numeric('headlayer')}.',
+        );
+      }
+      final headDepth = headPlacement.depth;
       return poseDepth * 1000000000 + headDepth * 10000 + part.orderedPartIndex;
     }
     return poseDepth * 1000000000 +

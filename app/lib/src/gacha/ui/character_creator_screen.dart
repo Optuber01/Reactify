@@ -90,6 +90,8 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
   final TextEditingController _codeController = TextEditingController();
   final Map<String, Future<String>> _fixtureCodeCache = {};
   final Map<String, String> _colorDrafts = {};
+  final List<GachaCharacterState> _undoStates = [];
+  final List<GachaCharacterState> _redoStates = [];
 
   String? _selectedCaseId;
   String _baselineLabel = 'fixture';
@@ -298,6 +300,10 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
               resolvedPartCount: scene.parts.length,
               nativeSlotCount: _reactifyCharacter?.slots.length ?? 0,
               nativePartCount: _reactifyResolvedPartCount,
+              canUndo: _undoStates.isNotEmpty,
+              canRedo: _redoStates.isNotEmpty,
+              onUndo: _undo,
+              onRedo: _redo,
               onChanged: _loadFixture,
             ),
             const SizedBox(height: 16),
@@ -427,6 +433,8 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
       final state = _parser.parse(normalized);
       _codeController.text = normalized;
       _colorDrafts.clear();
+      _undoStates.clear();
+      _redoStates.clear();
       await _setCurrentState(
         state,
         baselineState: state,
@@ -577,6 +585,7 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
       baselineLabel: _baselineLabel,
       selectedField: _selectedField,
       messageText: 'Reset the editor back to the imported baseline.',
+      recordHistory: true,
     );
   }
 
@@ -593,9 +602,11 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
     if (currentState == null) {
       return;
     }
-    final nextValue = clampToEditorRange(
-      widget.tables.editorValueRangeFor(field),
-      value,
+    final nextValue = constrainToEditorDomain(
+      currentValue: currentState.numeric(field),
+      proposedValue: value,
+      declaredRange: widget.tables.editorValueRangeFor(field),
+      supportedValues: previewSupportedValues(widget.tables, field),
     );
     final next = currentState.updateNumericField(
       widget.tables.schema,
@@ -607,6 +618,7 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
       next,
       selectedField: field,
       messageText: 'Updated $field to $nextValue ($previewLabel).',
+      recordHistory: true,
     );
   }
 
@@ -658,6 +670,7 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
       next,
       selectedField: field,
       messageText: 'Updated $field to $normalized.',
+      recordHistory: true,
     );
   }
 
@@ -676,7 +689,16 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
     String? baselineLabel,
     String? selectedField,
     String? messageText,
+    bool recordHistory = false,
   }) async {
+    final previousState = _currentState;
+    if (recordHistory &&
+        previousState != null &&
+        previousState.serializeCode() != next.serializeCode()) {
+      _undoStates.add(previousState);
+      if (_undoStates.length > 100) _undoStates.removeAt(0);
+      _redoStates.clear();
+    }
     final serial = ++_renderSerial;
     final previousScene = _scene;
     setState(() {
@@ -725,6 +747,30 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
         _messageIsError = true;
       });
     }
+  }
+
+  Future<void> _undo() async {
+    final current = _currentState;
+    if (current == null || _undoStates.isEmpty) return;
+    final previous = _undoStates.removeLast();
+    _redoStates.add(current);
+    await _setCurrentState(
+      previous,
+      selectedField: _selectedField,
+      messageText: 'Undid the last character edit.',
+    );
+  }
+
+  Future<void> _redo() async {
+    final current = _currentState;
+    if (current == null || _redoStates.isEmpty) return;
+    final next = _redoStates.removeLast();
+    _undoStates.add(current);
+    await _setCurrentState(
+      next,
+      selectedField: _selectedField,
+      messageText: 'Redid the character edit.',
+    );
   }
 
   Future<void> _applyNativeEditor(
@@ -1027,6 +1073,10 @@ class _HeaderBar extends StatelessWidget {
     required this.resolvedPartCount,
     required this.nativeSlotCount,
     required this.nativePartCount,
+    required this.canUndo,
+    required this.canRedo,
+    required this.onUndo,
+    required this.onRedo,
     required this.onChanged,
   });
 
@@ -1036,6 +1086,10 @@ class _HeaderBar extends StatelessWidget {
   final int resolvedPartCount;
   final int nativeSlotCount;
   final int nativePartCount;
+  final bool canUndo;
+  final bool canRedo;
+  final VoidCallback onUndo;
+  final VoidCallback onRedo;
   final ValueChanged<String> onChanged;
 
   @override
@@ -1121,6 +1175,19 @@ class _HeaderBar extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 20),
+                  IconButton(
+                    tooltip: 'Undo character edit',
+                    onPressed: canUndo ? onUndo : null,
+                    color: Colors.white,
+                    icon: const Icon(Icons.undo),
+                  ),
+                  IconButton(
+                    tooltip: 'Redo character edit',
+                    onPressed: canRedo ? onRedo : null,
+                    color: Colors.white,
+                    icon: const Icon(Icons.redo),
+                  ),
+                  const SizedBox(width: 8),
                   _SpringDropdownButton(
                     selected: selected,
                     cases: cases,
@@ -2211,8 +2278,15 @@ class _CompactNumericField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final minValue = spec.minValue ?? fallbackRange?.minValue;
-    final maxValue = spec.maxValue ?? fallbackRange?.maxValue;
+    final supportedValues = previewSupportedValues(tables, spec.field);
+    final domain = effectiveEditorDomain(
+      currentValue: value,
+      declaredMin: spec.minValue ?? fallbackRange?.minValue,
+      declaredMax: spec.maxValue ?? fallbackRange?.maxValue,
+      supportedValues: supportedValues,
+    );
+    final minValue = domain.min;
+    final maxValue = domain.max;
     final supportLabel = previewSupportLabel(tables, spec.field);
     final previewBacked = isPreviewBackedField(spec.field);
 

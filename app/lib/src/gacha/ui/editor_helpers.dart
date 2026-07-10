@@ -15,17 +15,42 @@ String? canonicalRgbHexOrNull(String value) {
   return isValidRgbHex(normalized) ? normalized : null;
 }
 
-int clampToEditorRange(EditorValueRange? range, int value) {
-  if (range == null) {
-    return value;
+({int? min, int? max}) effectiveEditorDomain({
+  required int currentValue,
+  int? declaredMin,
+  int? declaredMax,
+  List<int> supportedValues = const [],
+}) {
+  if (declaredMin == null && declaredMax == null && supportedValues.isEmpty) {
+    return (min: null, max: null);
   }
-  if (value < range.minValue) {
-    return range.minValue;
+  final minimums = <int>[currentValue];
+  final maximums = <int>[currentValue];
+  if (declaredMin != null) minimums.add(declaredMin);
+  if (declaredMax != null) maximums.add(declaredMax);
+  if (supportedValues.isNotEmpty) {
+    minimums.add(supportedValues.first);
+    maximums.add(supportedValues.last);
   }
-  if (value > range.maxValue) {
-    return range.maxValue;
-  }
-  return value;
+  minimums.sort();
+  maximums.sort();
+  return (min: minimums.first, max: maximums.last);
+}
+
+int constrainToEditorDomain({
+  required int currentValue,
+  required int proposedValue,
+  required EditorValueRange? declaredRange,
+  List<int> supportedValues = const [],
+}) {
+  if (declaredRange == null && supportedValues.isEmpty) return proposedValue;
+  final domain = effectiveEditorDomain(
+    currentValue: currentValue,
+    declaredMin: declaredRange?.minValue,
+    declaredMax: declaredRange?.maxValue,
+    supportedValues: supportedValues,
+  );
+  return proposedValue.clamp(domain.min!, domain.max!);
 }
 
 const Map<String, List<String>> _previewFieldFamilies = {

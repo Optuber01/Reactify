@@ -3,6 +3,14 @@ import '../project/project.dart';
 typedef ProjectJsonMigration =
     Map<String, Object?> Function(Map<String, Object?> source);
 
+class UnsupportedProjectSchemaException extends FormatException {
+  UnsupportedProjectSchemaException(int version, int supportedVersion)
+    : super(
+        'Project schema $version is newer than supported schema '
+        '$supportedVersion.',
+      );
+}
+
 class ProjectMigrationResult {
   const ProjectMigrationResult({
     required this.json,
@@ -32,9 +40,7 @@ class ProjectSchemaMigrationRegistry {
       throw FormatException('Invalid project schema $fromVersion.');
     }
     if (fromVersion > currentVersion) {
-      throw FormatException(
-        'Project schema $fromVersion is newer than supported schema $currentVersion.',
-      );
+      throw UnsupportedProjectSchemaException(fromVersion, currentVersion);
     }
     var version = fromVersion;
     var json = canonicalJsonMap(source);

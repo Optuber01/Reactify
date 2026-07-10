@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import '../commands/commands.dart';
@@ -130,6 +131,54 @@ abstract interface class ProjectRepository {
   Future<List<ProjectSaveMetadata>> recentSaves();
 }
 
+class SerializedProjectWriter {
+  SerializedProjectWriter(this.repository);
+
+  final ProjectRepository repository;
+  Future<void> _pending = Future<void>.value();
+  int _nextVersion = 0;
+
+  Future<VersionedProjectSaveResult> save(
+    ReactifyProjectDocument project,
+    String location,
+  ) {
+    final version = ++_nextVersion;
+    final completion = Completer<VersionedProjectSaveResult>();
+    Future<void> performSave() async {
+      try {
+        final result = await repository.save(project, location);
+        completion.complete(
+          VersionedProjectSaveResult(
+            version: version,
+            project: project,
+            result: result,
+          ),
+        );
+      } catch (error, stackTrace) {
+        completion.completeError(error, stackTrace);
+      }
+    }
+
+    _pending = _pending.then(
+      (_) => performSave(),
+      onError: (Object _, StackTrace _) => performSave(),
+    );
+    return completion.future;
+  }
+}
+
+class VersionedProjectSaveResult {
+  const VersionedProjectSaveResult({
+    required this.version,
+    required this.project,
+    required this.result,
+  });
+
+  final int version;
+  final ReactifyProjectDocument project;
+  final ProjectSaveResult result;
+}
+
 abstract interface class AssetAvailabilityProbe {
   Future<bool> exists(String location);
 }
@@ -156,6 +205,8 @@ class ProjectDocumentSerializer {
       _requireValid(project, 'Loaded project is structurally invalid.');
       return DecodedProjectDocument(project: project, migration: migration);
     } on ProjectRepositoryException {
+      rethrow;
+    } on FormatException {
       rethrow;
     } catch (error) {
       throw ProjectRepositoryException(

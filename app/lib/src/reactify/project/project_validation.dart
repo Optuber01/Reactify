@@ -354,6 +354,9 @@ class ReactifyProjectValidator {
       'characters',
       issues,
     );
+    for (final character in project.characters.values) {
+      _validateCharacterDocument(character, issues);
+    }
     _validateMapIds(
       project.expressions,
       (value) => value.id,
@@ -499,6 +502,63 @@ class ReactifyProjectValidator {
     }
     _validateTextPresetCycles(project, issues);
     return List.unmodifiable(issues);
+  }
+
+  void _validateCharacterDocument(
+    CharacterResource character,
+    List<ProjectValidationIssue> issues,
+  ) {
+    void inspect(Object? value, String path) {
+      if (value is Map<String, Object?>) {
+        for (final entry in value.entries) {
+          final key = entry.key.toLowerCase();
+          final childPath = '$path.${entry.key}';
+          if (key == 'embeddeddocument' ||
+              key == 'embedded_document' ||
+              key == 'rasterdata' ||
+              key == 'raster_data' ||
+              key == 'base64') {
+            issues.add(
+              ProjectValidationIssue(
+                code: key.contains('document')
+                    ? 'character.embeddedDocument'
+                    : 'character.embeddedRaster',
+                path: childPath,
+                message: 'Character documents must reference source assets.',
+              ),
+            );
+          }
+          inspect(entry.value, childPath);
+        }
+      } else if (value is List<Object?>) {
+        for (var index = 0; index < value.length; index += 1) {
+          inspect(value[index], '$path.$index');
+        }
+      } else if (value is String) {
+        final normalized = value.trimLeft().toLowerCase();
+        if (normalized.startsWith('data:image/')) {
+          issues.add(
+            ProjectValidationIssue(
+              code: 'character.embeddedRaster',
+              path: path,
+              message: 'Character documents cannot embed raster data URIs.',
+            ),
+          );
+        }
+        if (normalized.contains('<foreignobject') ||
+            RegExp(r'<image\b').hasMatch(normalized)) {
+          issues.add(
+            ProjectValidationIssue(
+              code: 'character.embeddedDocument',
+              path: path,
+              message: 'Character documents cannot embed document content.',
+            ),
+          );
+        }
+      }
+    }
+
+    inspect(character.document, 'characters.${character.id}.document');
   }
 
   void _validateTextPresetCycles(

@@ -3,6 +3,7 @@ import 'dart:io';
 
 import '../project/project.dart';
 import 'portable_asset_uri.dart';
+import 'project_migrations.dart';
 import 'project_repository.dart';
 
 class IoAssetAvailabilityProbe implements AssetAvailabilityProbe {
@@ -38,6 +39,8 @@ class IoProjectRepository implements ProjectRepository {
     if (await primary.exists()) {
       try {
         return await _loadFile(primary, location, ProjectLoadSource.primary);
+      } on UnsupportedProjectSchemaException {
+        rethrow;
       } catch (error) {
         primaryError = error;
       }
@@ -45,6 +48,8 @@ class IoProjectRepository implements ProjectRepository {
     if (await backup.exists()) {
       try {
         return await _loadFile(backup, location, ProjectLoadSource.backup);
+      } on UnsupportedProjectSchemaException {
+        rethrow;
       } catch (backupError) {
         throw ProjectRepositoryException(
           'Primary and backup project files are unreadable.',

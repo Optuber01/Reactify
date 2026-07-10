@@ -1,5 +1,6 @@
 import '../media/media.dart';
 import '../project/project.dart';
+import 'reaction_dialogue_selection.dart';
 import 'reaction_export_models.dart';
 
 class ReactionExportPlanner {
@@ -376,7 +377,19 @@ class ReactionExportPlanner {
       'characters': characterEntries,
       'clipVisual': event?.clip.visual.toJson(),
       'composition': request.options.composition.name,
-      'dialogue': includeDialogue ? state.dialogueMetadata : null,
+      'dialogue': includeDialogue
+          ? {
+              'state': state.dialogueMetadata,
+              'clips': [
+                if (timeline != null && event != null)
+                  for (final active in activeReactionDialogueClips(
+                    timeline,
+                    event,
+                  ))
+                    {'trackId': active.track.id, 'clip': active.clip.toJson()},
+              ],
+            }
+          : null,
       'includeDialogue': includeDialogue,
       'includeMedia': includeMedia,
       'layout': layout,

@@ -6,7 +6,32 @@ import '../export/reactify_svg_exporter.dart';
 import '../media/media.dart';
 import '../model/reactify_document.dart';
 import '../project/project.dart';
+import '../text/project_text_adapter.dart';
+import '../text/reaction_text_renderer.dart';
+import 'reaction_dialogue_selection.dart';
 import 'reaction_export_models.dart';
+
+class ReactionDialogueOverlay {
+  const ReactionDialogueOverlay({
+    required this.trackId,
+    required this.clip,
+    required this.textLayout,
+    required this.safeBounds,
+    required this.offset,
+    required this.scale,
+    required this.transform,
+    required this.opacity,
+  });
+
+  final String trackId;
+  final RichTextTimelineClip clip;
+  final ReactionTextLayout textLayout;
+  final ui.Rect safeBounds;
+  final ui.Offset offset;
+  final double scale;
+  final AffineMatrix transform;
+  final double opacity;
+}
 
 class ReactifyReactionStateRenderer implements ReactionStateRenderer {
   const ReactifyReactionStateRenderer({required this.pngExporter});
@@ -168,13 +193,21 @@ class ReactifyReactionStateRenderer implements ReactionStateRenderer {
         request.composition == ReactionExportComposition.composited
         ? _color(canvas.backgroundColor)
         : null;
+    final dialogue = dialogueOverlays(request);
     Uint8List pngBytes;
     try {
-      pngBytes = await pngExporter.exportScene(
-        scene,
-        nativeCharacters,
-        backgroundColor: backgroundColor,
-      );
+      pngBytes = dialogue.isEmpty
+          ? await pngExporter.exportScene(
+              scene,
+              nativeCharacters,
+              backgroundColor: backgroundColor,
+            )
+          : await _exportSceneWithDialogue(
+              scene,
+              nativeCharacters,
+              backgroundColor,
+              dialogue,
+            );
     } on MediaFailure {
       rethrow;
     } catch (error) {
@@ -203,13 +236,139 @@ class ReactifyReactionStateRenderer implements ReactionStateRenderer {
     );
   }
 
+  List<ReactionDialogueOverlay> dialogueOverlays(
+    ReactionRenderRequest request,
+  ) {
+    final timeline = request.timeline;
+    final event = request.event;
+    if (!request.includeDialogue ||
+        timeline == null ||
+        event == null ||
+        !event.clip.showDialogue) {
+      return const [];
+    }
+    final layout = request.project.layouts[request.state.layoutId];
+    if (layout == null) {
+      throw MediaFailure(
+        code: MediaFailureCode.sourceMissing,
+        message: 'The reaction state layout is missing.',
+        context: {'layoutId': request.state.layoutId},
+      );
+    }
+    final canvas = timeline.canvas;
+    final active = activeReactionDialogueClips(timeline, event);
+    final safeRegions = layout.textSafeRegions.isEmpty
+        ? const [NormalizedRect(left: 0, top: 0, width: 1, height: 1)]
+        : layout.textSafeRegions;
+    const adapter = ProjectReactionTextAdapter();
+    final overlays = <ReactionDialogueOverlay>[];
+    for (var index = 0; index < active.length; index += 1) {
+      final entry = active[index];
+      final clip = entry.clip;
+      _validateTextVisual(clip);
+      final safeIndex = _safeRegionIndex(clip, index, safeRegions.length);
+      final normalized = safeRegions[safeIndex];
+      final safeBounds = _safeBounds(normalized, canvas, clip.id);
+      final textDirection = _textDirection(clip);
+      final textLayout = adapter.layoutClip(
+        project: request.project,
+        timeline: timeline,
+        clip: clip,
+        maxWidth: safeBounds.width,
+        textDirection: textDirection,
+      );
+      final scale = textLayout.size.height <= 0
+          ? 1.0
+          : (safeBounds.height / textLayout.size.height).clamp(0.0, 1.0);
+      final paintedWidth = textLayout.size.width * scale;
+      final paintedHeight = textLayout.size.height * scale;
+      overlays.add(
+        ReactionDialogueOverlay(
+          trackId: entry.track.id,
+          clip: clip,
+          textLayout: textLayout,
+          safeBounds: safeBounds,
+          offset: ui.Offset(
+            safeBounds.left + (safeBounds.width - paintedWidth) / 2,
+            safeBounds.top + (safeBounds.height - paintedHeight) / 2,
+          ),
+          scale: scale,
+          transform: _matrix(clip.visual.transform),
+          opacity: clip.visual.opacity,
+        ),
+      );
+    }
+    return List.unmodifiable(overlays);
+  }
+
+  Future<Uint8List> _exportSceneWithDialogue(
+    ReactifySceneDocument scene,
+    Map<String, ReactifyCharacterDocument> characters,
+    ui.Color? backgroundColor,
+    List<ReactionDialogueOverlay> overlays,
+  ) async {
+    final resolved = await pngExporter.bridge.buildRenderableScene(
+      scene,
+      characters,
+    );
+    final baseImage = await ReactifyPngExporter.renderResolvedScene(
+      resolved,
+      scene.canvasSize,
+      backgroundColor: backgroundColor,
+    );
+    ui.Image? outputImage;
+    try {
+      final recorder = ui.PictureRecorder();
+      final canvas = ui.Canvas(recorder);
+      canvas.drawImage(baseImage, ui.Offset.zero, ui.Paint());
+      const textRenderer = ReactionTextBlockRenderer();
+      for (final overlay in overlays) {
+        if (overlay.opacity <= 0) continue;
+        canvas.save();
+        canvas.clipRect(overlay.safeBounds);
+        if (overlay.opacity < 1) {
+          canvas.saveLayer(
+            overlay.safeBounds,
+            ui.Paint()
+              ..color = ui.Color.fromARGB(
+                (overlay.opacity * 255).round(),
+                255,
+                255,
+                255,
+              ),
+          );
+        }
+        canvas.transform(overlay.transform.toFloat64List());
+        canvas.translate(overlay.offset.dx, overlay.offset.dy);
+        canvas.scale(overlay.scale);
+        textRenderer.paint(canvas, overlay.textLayout);
+        if (overlay.opacity < 1) canvas.restore();
+        canvas.restore();
+      }
+      outputImage = await recorder.endRecording().toImage(
+        scene.canvasSize.width.toInt(),
+        scene.canvasSize.height.toInt(),
+      );
+      final data = await outputImage.toByteData(format: ui.ImageByteFormat.png);
+      if (data == null) {
+        throw MediaFailure(
+          code: MediaFailureCode.encodeFailed,
+          message: 'Unable to encode reaction dialogue PNG.',
+        );
+      }
+      return data.buffer.asUint8List();
+    } finally {
+      baseImage.dispose();
+      outputImage?.dispose();
+    }
+  }
+
   void _validateRequestedSemantics(ReactionRenderRequest request) {
-    if (request.includeDialogue &&
-        (request.state.dialogueMetadata.isNotEmpty ||
-            _hasActiveDialogue(request))) {
+    if (request.includeDialogue && request.state.dialogueMetadata.isNotEmpty) {
       throw MediaFailure(
         code: MediaFailureCode.unsupportedCapability,
-        message: 'Reaction-state PNG dialogue compositing is not supported.',
+        message:
+            'Unstructured reaction-state dialogue metadata is not supported.',
         context: {'stateId': request.state.id},
       );
     }
@@ -248,25 +407,88 @@ class ReactifyReactionStateRenderer implements ReactionStateRenderer {
     }
   }
 
-  bool _hasActiveDialogue(ReactionRenderRequest request) {
-    final timeline = request.timeline;
-    final event = request.event;
-    if (timeline == null || event == null) return false;
-    for (final track in timeline.tracks.values) {
-      if (!track.enabled ||
-          !track.visible ||
-          track.type != TimelineTrackType.richText) {
-        continue;
-      }
-      for (final clip in track.clips.values) {
-        if (clip is RichTextTimelineClip &&
-            clip.enabled &&
-            clip.range.overlaps(event.clip.range)) {
-          return true;
-        }
-      }
+  void _validateTextVisual(RichTextTimelineClip clip) {
+    final visual = clip.visual;
+    if (!visual.opacity.isFinite || visual.opacity < 0 || visual.opacity > 1) {
+      throw MediaFailure(
+        code: MediaFailureCode.invalidRequest,
+        message: 'Dialogue clip opacity must be between zero and one.',
+        context: {'clipId': clip.id},
+      );
     }
-    return false;
+    if (visual.crop != null ||
+        visual.fadeInFrames != 0 ||
+        visual.fadeOutFrames != 0 ||
+        visual.transitionIn != null ||
+        visual.transitionOut != null ||
+        visual.effects.isNotEmpty) {
+      throw MediaFailure(
+        code: MediaFailureCode.unsupportedCapability,
+        message:
+            'Dialogue crop, fades, transitions, and effects are not supported by PNG export.',
+        context: {'clipId': clip.id},
+      );
+    }
+  }
+
+  int _safeRegionIndex(
+    RichTextTimelineClip clip,
+    int fallback,
+    int regionCount,
+  ) {
+    final value =
+        clip.metadata['safeRegionIndex'] ??
+        clip.metadata['textSafeRegionIndex'];
+    if (value == null) return fallback % regionCount;
+    if (value is! int || value < 0 || value >= regionCount) {
+      throw MediaFailure(
+        code: MediaFailureCode.invalidRequest,
+        message: 'Dialogue safe-region index is invalid.',
+        context: {'clipId': clip.id, 'safeRegionIndex': value},
+      );
+    }
+    return value;
+  }
+
+  ui.Rect _safeBounds(
+    NormalizedRect region,
+    ProjectCanvas canvas,
+    String clipId,
+  ) {
+    final values = [region.left, region.top, region.width, region.height];
+    if (values.any((value) => !value.isFinite) ||
+        region.left < 0 ||
+        region.top < 0 ||
+        region.width <= 0 ||
+        region.height <= 0 ||
+        region.left + region.width > 1 ||
+        region.top + region.height > 1) {
+      throw MediaFailure(
+        code: MediaFailureCode.invalidRequest,
+        message:
+            'Dialogue safe region must be a normalized in-bounds rectangle.',
+        context: {'clipId': clipId},
+      );
+    }
+    return ui.Rect.fromLTWH(
+      region.left * canvas.width,
+      region.top * canvas.height,
+      region.width * canvas.width,
+      region.height * canvas.height,
+    );
+  }
+
+  ui.TextDirection _textDirection(RichTextTimelineClip clip) {
+    final value = clip.metadata['textDirection'];
+    return switch (value) {
+      null || 'ltr' => ui.TextDirection.ltr,
+      'rtl' => ui.TextDirection.rtl,
+      _ => throw MediaFailure(
+        code: MediaFailureCode.invalidRequest,
+        message: 'Dialogue text direction must be ltr or rtl.',
+        context: {'clipId': clip.id, 'textDirection': value},
+      ),
+    };
   }
 
   LayoutPlacement? _placementFor(

@@ -19,6 +19,7 @@ class StudioProjectController extends ChangeNotifier {
     _store.addListener(_handleStoreChange);
     selectedTimelineId = _store.project.timelines.keys.first;
     selectedReactionStateId = _store.project.reactionStates.keys.first;
+    selectedCharacterId = _store.project.characters.keys.first;
   }
 
   ProjectCommandStore _store;
@@ -26,6 +27,7 @@ class StudioProjectController extends ChangeNotifier {
   final Duration autosaveDelay;
   late TimelineId selectedTimelineId;
   late ReactionStateId selectedReactionStateId;
+  CharacterId? selectedCharacterId;
   int playheadFrame = 0;
   int _stateSerial = 0;
   int _timelineSerial = 0;
@@ -311,6 +313,9 @@ class StudioProjectController extends ChangeNotifier {
     _store.addListener(_handleStoreChange);
     selectedTimelineId = next.timelines.keys.first;
     selectedReactionStateId = next.reactionStates.keys.first;
+    selectedCharacterId = next.characters.isEmpty
+        ? null
+        : next.characters.keys.first;
     playheadFrame = 0;
     lastChange = null;
   }
@@ -320,6 +325,17 @@ class StudioProjectController extends ChangeNotifier {
     var candidate = prefix;
     var suffix = 2;
     while (project.timelines.containsKey(candidate)) {
+      candidate = '$prefix.$suffix';
+      suffix += 1;
+    }
+    return candidate;
+  }
+
+  CharacterId _uniqueCharacterId(String stem) {
+    final prefix = 'character.${_slug(stem)}';
+    var candidate = prefix;
+    var suffix = 2;
+    while (project.characters.containsKey(candidate)) {
       candidate = '$prefix.$suffix';
       suffix += 1;
     }
@@ -361,6 +377,113 @@ class StudioProjectController extends ChangeNotifier {
     }
     selectedReactionStateId = id;
     notifyListeners();
+  }
+
+  void selectCharacter(CharacterId id) {
+    if (!project.characters.containsKey(id) || id == selectedCharacterId) {
+      return;
+    }
+    selectedCharacterId = id;
+    notifyListeners();
+  }
+
+  CharacterId addCharacter(CharacterResource resource) {
+    final id = project.characters.containsKey(resource.id)
+        ? _uniqueCharacterId(resource.name)
+        : resource.id;
+    final name = resource.name.trim().isEmpty
+        ? 'Untitled Character'
+        : resource.name.trim();
+    final document = {...resource.document, 'id': id, 'name': name};
+    _store.execute(
+      UpsertProjectEntityCommand(
+        kind: ProjectEntityKind.character,
+        entity: resource.copyWith(id: id, name: name, document: document),
+      ),
+    );
+    selectedCharacterId = id;
+    notifyListeners();
+    return id;
+  }
+
+  void updateCharacter(CharacterResource resource) {
+    if (!project.characters.containsKey(resource.id)) {
+      throw ProjectCommandException(
+        'Character ${resource.id} does not exist in this project.',
+      );
+    }
+    final name = resource.name.trim().isEmpty
+        ? 'Untitled Character'
+        : resource.name.trim();
+    _store.execute(
+      UpsertProjectEntityCommand(
+        kind: ProjectEntityKind.character,
+        entity: resource.copyWith(
+          name: name,
+          document: {...resource.document, 'id': resource.id, 'name': name},
+        ),
+      ),
+    );
+    selectedCharacterId = resource.id;
+    notifyListeners();
+  }
+
+  CharacterId duplicateCharacter(CharacterId id, {String? name}) {
+    final source = project.characters[id];
+    if (source == null) {
+      throw ProjectCommandException('Character $id does not exist.');
+    }
+    final duplicateName = name?.trim().isNotEmpty == true
+        ? name!.trim()
+        : '${source.name} Copy';
+    final duplicateId = _uniqueCharacterId(duplicateName);
+    final duplicate = source.copyWith(
+      id: duplicateId,
+      name: duplicateName,
+      document: {...source.document, 'id': duplicateId, 'name': duplicateName},
+      metadata: {...source.metadata, 'duplicatedFromCharacterId': id},
+    );
+    _store.execute(
+      UpsertProjectEntityCommand(
+        kind: ProjectEntityKind.character,
+        entity: duplicate,
+      ),
+    );
+    selectedCharacterId = duplicateId;
+    notifyListeners();
+    return duplicateId;
+  }
+
+  void renameCharacter(CharacterId id, String name) {
+    final source = project.characters[id];
+    if (source == null) {
+      throw ProjectCommandException('Character $id does not exist.');
+    }
+    final trimmed = name.trim();
+    if (trimmed.isEmpty || trimmed == source.name) {
+      return;
+    }
+    updateCharacter(
+      source.copyWith(
+        name: trimmed,
+        document: {...source.document, 'name': trimmed},
+      ),
+    );
+  }
+
+  void deleteCharacter(CharacterId id) {
+    _store.execute(
+      RemoveProjectEntityCommand(
+        kind: ProjectEntityKind.character,
+        entityId: id,
+      ),
+    );
+    if (selectedCharacterId == id) {
+      selectedCharacterId = project.characters.isEmpty
+          ? null
+          : project.characters.keys.first;
+      notifyListeners();
+    }
   }
 
   void setPlayhead(int frame) {
@@ -530,6 +653,12 @@ class StudioProjectController extends ChangeNotifier {
     }
     if (!project.reactionStates.containsKey(selectedReactionStateId)) {
       selectedReactionStateId = project.reactionStates.keys.first;
+    }
+    if (selectedCharacterId != null &&
+        !project.characters.containsKey(selectedCharacterId)) {
+      selectedCharacterId = project.characters.isEmpty
+          ? null
+          : project.characters.keys.first;
     }
     playheadFrame = playheadFrame.clamp(0, selectedTimeline.durationFrames - 1);
   }

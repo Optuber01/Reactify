@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ui';
 import 'package:file_picker/file_picker.dart';
@@ -11,6 +12,7 @@ import '../data/resolver_tables.dart';
 import '../../reactify/export/reactify_svg_exporter.dart';
 import '../../reactify/legacy/gacha_to_reactify_adapter.dart';
 import '../../reactify/model/reactify_document.dart';
+import '../../reactify/project/project.dart' hide TextCapitalization;
 import '../../reactify/render/reactify_render_bridge.dart';
 import '../render/character_renderer.dart';
 import '../render/gacha_game_canvas.dart';
@@ -22,7 +24,27 @@ import 'debug_render_panel.dart';
 import 'editor_helpers.dart';
 
 class CharacterCreatorScreen extends StatefulWidget {
-  const CharacterCreatorScreen({super.key});
+  const CharacterCreatorScreen({
+    super.key,
+    this.characterLibrary = const {},
+    this.selectedLibraryCharacterId,
+    this.onAddLibraryCharacter,
+    this.onUpdateLibraryCharacter,
+    this.onSelectLibraryCharacter,
+    this.onDuplicateLibraryCharacter,
+    this.onRenameLibraryCharacter,
+    this.onDeleteLibraryCharacter,
+  });
+
+  final Map<CharacterId, CharacterResource> characterLibrary;
+  final CharacterId? selectedLibraryCharacterId;
+  final CharacterId Function(CharacterResource resource)? onAddLibraryCharacter;
+  final void Function(CharacterResource resource)? onUpdateLibraryCharacter;
+  final void Function(CharacterId id)? onSelectLibraryCharacter;
+  final CharacterId Function(CharacterId id, {String? name})?
+  onDuplicateLibraryCharacter;
+  final void Function(CharacterId id, String name)? onRenameLibraryCharacter;
+  final void Function(CharacterId id)? onDeleteLibraryCharacter;
 
   @override
   State<CharacterCreatorScreen> createState() => _CharacterCreatorScreenState();
@@ -56,6 +78,14 @@ class _CharacterCreatorScreenState extends State<CharacterCreatorScreen> {
             return _CharacterEditorShell(
               tables: snapshot.data!,
               assetStore: _assetStore,
+              characterLibrary: widget.characterLibrary,
+              selectedLibraryCharacterId: widget.selectedLibraryCharacterId,
+              onAddLibraryCharacter: widget.onAddLibraryCharacter,
+              onUpdateLibraryCharacter: widget.onUpdateLibraryCharacter,
+              onSelectLibraryCharacter: widget.onSelectLibraryCharacter,
+              onDuplicateLibraryCharacter: widget.onDuplicateLibraryCharacter,
+              onRenameLibraryCharacter: widget.onRenameLibraryCharacter,
+              onDeleteLibraryCharacter: widget.onDeleteLibraryCharacter,
             );
           },
         ),
@@ -65,10 +95,30 @@ class _CharacterCreatorScreenState extends State<CharacterCreatorScreen> {
 }
 
 class _CharacterEditorShell extends StatefulWidget {
-  const _CharacterEditorShell({required this.tables, required this.assetStore});
+  const _CharacterEditorShell({
+    required this.tables,
+    required this.assetStore,
+    required this.characterLibrary,
+    this.selectedLibraryCharacterId,
+    this.onAddLibraryCharacter,
+    this.onUpdateLibraryCharacter,
+    this.onSelectLibraryCharacter,
+    this.onDuplicateLibraryCharacter,
+    this.onRenameLibraryCharacter,
+    this.onDeleteLibraryCharacter,
+  });
 
   final ResolverTables tables;
   final GachaAssetStore assetStore;
+  final Map<CharacterId, CharacterResource> characterLibrary;
+  final CharacterId? selectedLibraryCharacterId;
+  final CharacterId Function(CharacterResource resource)? onAddLibraryCharacter;
+  final void Function(CharacterResource resource)? onUpdateLibraryCharacter;
+  final void Function(CharacterId id)? onSelectLibraryCharacter;
+  final CharacterId Function(CharacterId id, {String? name})?
+  onDuplicateLibraryCharacter;
+  final void Function(CharacterId id, String name)? onRenameLibraryCharacter;
+  final void Function(CharacterId id)? onDeleteLibraryCharacter;
 
   @override
   State<_CharacterEditorShell> createState() => _CharacterEditorShellState();
@@ -108,19 +158,45 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
   String? _messageText;
   bool _messageIsError = false;
   int _renderSerial = 0;
+  int _libraryLoadSerial = 0;
+  CharacterId? _activeLibraryCharacterId;
+  bool _libraryDocumentHasNoLegacyState = false;
 
   @override
   void initState() {
     super.initState();
-    final firstCase = widget.tables.editorFixtures.first;
-    _selectedCaseId = firstCase.id;
-    _loadFixture(firstCase.id);
+    unawaited(_initializeEditor());
+  }
+
+  @override
+  void didUpdateWidget(covariant _CharacterEditorShell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final selectedId = widget.selectedLibraryCharacterId;
+    if (selectedId != oldWidget.selectedLibraryCharacterId &&
+        selectedId != _activeLibraryCharacterId) {
+      if (selectedId == null) {
+        _activeLibraryCharacterId = null;
+      } else {
+        unawaited(_loadLibraryCharacter(selectedId));
+      }
+    }
   }
 
   @override
   void dispose() {
+    _libraryLoadSerial += 1;
     _codeController.dispose();
     super.dispose();
+  }
+
+  Future<void> _initializeEditor() async {
+    final firstCase = widget.tables.editorFixtures.first;
+    _selectedCaseId = firstCase.id;
+    await _loadFixture(firstCase.id);
+    final selectedId = widget.selectedLibraryCharacterId;
+    if (mounted && selectedId != null) {
+      await _loadLibraryCharacter(selectedId);
+    }
   }
 
   void _handleStrokesDrawn(List<Offset> stroke) {
@@ -307,6 +383,40 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
               onRedo: _redo,
               onChanged: _loadFixture,
             ),
+            if (widget.characterLibrary.isNotEmpty ||
+                widget.onAddLibraryCharacter != null) ...[
+              const SizedBox(height: 10),
+              _CharacterLibraryBar(
+                characters: widget.characterLibrary,
+                selectedCharacterId:
+                    widget.selectedLibraryCharacterId ??
+                    _activeLibraryCharacterId,
+                onSelected: _selectLibraryCharacter,
+                onAdd: widget.onAddLibraryCharacter == null
+                    ? null
+                    : _addCurrentToLibrary,
+                onUpdate:
+                    widget.onUpdateLibraryCharacter == null ||
+                        widget.selectedLibraryCharacterId == null
+                    ? null
+                    : _updateSelectedLibraryCharacter,
+                onDuplicate:
+                    widget.onDuplicateLibraryCharacter == null ||
+                        widget.selectedLibraryCharacterId == null
+                    ? null
+                    : _duplicateSelectedLibraryCharacter,
+                onRename:
+                    widget.onRenameLibraryCharacter == null ||
+                        widget.selectedLibraryCharacterId == null
+                    ? null
+                    : _renameSelectedLibraryCharacter,
+                onDelete:
+                    widget.onDeleteLibraryCharacter == null ||
+                        widget.selectedLibraryCharacterId == null
+                    ? null
+                    : _deleteSelectedLibraryCharacter,
+              ),
+            ],
             const SizedBox(height: 16),
             Expanded(
               child: Row(
@@ -396,6 +506,341 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
         ),
       ),
     );
+  }
+
+  void _selectLibraryCharacter(CharacterId id) {
+    if (id == widget.selectedLibraryCharacterId) return;
+    final onSelect = widget.onSelectLibraryCharacter;
+    if (onSelect == null) {
+      unawaited(_loadLibraryCharacter(id));
+      return;
+    }
+    onSelect(id);
+  }
+
+  Future<void> _loadLibraryCharacter(CharacterId id) async {
+    final resource = widget.characterLibrary[id];
+    if (resource == null) return;
+    final serial = ++_libraryLoadSerial;
+    _activeLibraryCharacterId = id;
+    final legacyCode = resource.legacyGachaCode?.trim();
+    ReactifyCharacterDocument? document;
+    try {
+      if (resource.document['rig'] is Map &&
+          resource.document['slots'] is List) {
+        document = ReactifyCharacterDocument.fromJson(resource.document);
+      }
+    } catch (_) {
+      document = null;
+    }
+    if (legacyCode != null && legacyCode.isNotEmpty) {
+      try {
+        final state = _parser.parse(legacyCode);
+        _codeController.text = legacyCode;
+        _colorDrafts.clear();
+        _undoStates.clear();
+        _redoStates.clear();
+        await _setCurrentState(
+          state,
+          baselineState: state,
+          baselineLabel: resource.name,
+          selectedField: null,
+          messageText: 'Loaded ${resource.name} from the project library.',
+        );
+      } catch (error) {
+        if (!mounted || serial != _libraryLoadSerial) return;
+        setState(() {
+          _messageText = 'Could not load ${resource.name}: $error';
+          _messageIsError = true;
+        });
+        return;
+      }
+    }
+    if (!mounted || serial != _libraryLoadSerial) return;
+    if (document != null) {
+      final editor = _nativeEditor;
+      if (editor == null) return;
+      final currentDocument = document.copyWith(
+        id: 'char.current',
+        name: resource.name,
+        legacyGachaCode: legacyCode,
+      );
+      await _applyNativeEditor(
+        editor.copyWith(
+          characters: {
+            ...editor.characters,
+            currentDocument.id: currentDocument,
+          },
+        ),
+        messageText: 'Loaded ${resource.name} from the project library.',
+      );
+      _libraryDocumentHasNoLegacyState =
+          legacyCode == null || legacyCode.isEmpty;
+      return;
+    }
+    if (legacyCode == null || legacyCode.isEmpty) {
+      _libraryDocumentHasNoLegacyState = false;
+      setState(() {
+        _baselineLabel = resource.name;
+        _messageText =
+            '${resource.name} is a project placeholder. Edit the current character and choose Update to replace it.';
+        _messageIsError = false;
+      });
+    }
+  }
+
+  Future<void> _addCurrentToLibrary() async {
+    final callback = widget.onAddLibraryCharacter;
+    final document = _currentLibraryDocument;
+    if (callback == null || document == null) return;
+    final suggested = _suggestedCharacterName();
+    final name = await _requestCharacterName(
+      title: 'Add character to project',
+      actionLabel: 'Add Character',
+      initialValue: suggested,
+    );
+    if (!mounted || name == null) return;
+    final temporaryId = 'character.${_librarySlug(name)}';
+    late final CharacterId id;
+    try {
+      id = callback(
+        _buildLibraryResource(id: temporaryId, name: name, document: document),
+      );
+    } catch (error) {
+      _showLibraryError('add $name', error);
+      return;
+    }
+    _activeLibraryCharacterId = id;
+    setState(() {
+      _baselineLabel = name;
+      _messageText = 'Added $name to the project character library.';
+      _messageIsError = false;
+    });
+  }
+
+  void _updateSelectedLibraryCharacter() {
+    final callback = widget.onUpdateLibraryCharacter;
+    final id = widget.selectedLibraryCharacterId;
+    final document = _currentLibraryDocument;
+    final existing = id == null ? null : widget.characterLibrary[id];
+    if (callback == null ||
+        id == null ||
+        document == null ||
+        existing == null) {
+      return;
+    }
+    try {
+      callback(
+        _buildLibraryResource(
+          id: id,
+          name: existing.name,
+          document: document,
+          existing: existing,
+        ),
+      );
+    } catch (error) {
+      _showLibraryError('update ${existing.name}', error);
+      return;
+    }
+    setState(() {
+      _messageText = 'Updated ${existing.name} in the project library.';
+      _messageIsError = false;
+    });
+  }
+
+  Future<void> _duplicateSelectedLibraryCharacter() async {
+    final callback = widget.onDuplicateLibraryCharacter;
+    final id = widget.selectedLibraryCharacterId;
+    final existing = id == null ? null : widget.characterLibrary[id];
+    if (callback == null || id == null || existing == null) return;
+    final name = await _requestCharacterName(
+      title: 'Duplicate character',
+      actionLabel: 'Duplicate',
+      initialValue: '${existing.name} Copy',
+    );
+    if (!mounted || name == null) return;
+    late final CharacterId duplicateId;
+    try {
+      duplicateId = callback(id, name: name);
+    } catch (error) {
+      _showLibraryError('duplicate ${existing.name}', error);
+      return;
+    }
+    _activeLibraryCharacterId = duplicateId;
+    setState(() {
+      _baselineLabel = name;
+      _messageText = 'Duplicated ${existing.name} as $name.';
+      _messageIsError = false;
+    });
+  }
+
+  Future<void> _renameSelectedLibraryCharacter() async {
+    final callback = widget.onRenameLibraryCharacter;
+    final id = widget.selectedLibraryCharacterId;
+    final existing = id == null ? null : widget.characterLibrary[id];
+    if (callback == null || id == null || existing == null) return;
+    final name = await _requestCharacterName(
+      title: 'Rename character',
+      actionLabel: 'Rename',
+      initialValue: existing.name,
+    );
+    if (!mounted || name == null || name == existing.name) return;
+    try {
+      callback(id, name);
+    } catch (error) {
+      _showLibraryError('rename ${existing.name}', error);
+      return;
+    }
+    final editor = _nativeEditor;
+    final current = _currentLibraryDocument;
+    if (editor != null && current != null) {
+      await _applyNativeEditor(
+        editor.copyWith(
+          characters: {
+            ...editor.characters,
+            current.id: current.copyWith(name: name),
+          },
+        ),
+        messageText: 'Renamed ${existing.name} to $name.',
+      );
+    }
+    _baselineLabel = name;
+  }
+
+  Future<void> _deleteSelectedLibraryCharacter() async {
+    final callback = widget.onDeleteLibraryCharacter;
+    final id = widget.selectedLibraryCharacterId;
+    final existing = id == null ? null : widget.characterLibrary[id];
+    if (callback == null || id == null || existing == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete character?'),
+        content: Text(
+          '${existing.name} will be removed from this project. This can be undone from the studio history.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true) return;
+    try {
+      callback(id);
+    } catch (error) {
+      _showLibraryError('delete ${existing.name}', error);
+      return;
+    }
+    _activeLibraryCharacterId = null;
+    setState(() {
+      _messageText = 'Deleted ${existing.name} from the project library.';
+      _messageIsError = false;
+    });
+  }
+
+  ReactifyCharacterDocument? get _currentLibraryDocument {
+    final editor = _nativeEditor;
+    if (editor == null) return _reactifyCharacter;
+    return editor.characters['char.current'] ?? _reactifyCharacter;
+  }
+
+  CharacterResource _buildLibraryResource({
+    required CharacterId id,
+    required String name,
+    required ReactifyCharacterDocument document,
+    CharacterResource? existing,
+  }) {
+    final code = _libraryDocumentHasNoLegacyState
+        ? existing?.legacyGachaCode
+        : _currentState?.serializeCode();
+    return CharacterResource(
+      id: id,
+      name: name,
+      document: document
+          .copyWith(id: id, name: name, legacyGachaCode: code)
+          .toJson(),
+      legacyGachaCode: code,
+      thumbnailAssetId: existing?.thumbnailAssetId,
+      metadata: {...?existing?.metadata, 'source': 'character_editor'},
+    );
+  }
+
+  String _suggestedCharacterName() {
+    final documentName = _currentLibraryDocument?.name.trim();
+    if (documentName != null &&
+        documentName.isNotEmpty &&
+        documentName != 'Partner') {
+      return documentName == 'Migrated Gacha Character'
+          ? 'New Character'
+          : documentName;
+    }
+    return _baselineLabel == 'fixture' ? 'New Character' : _baselineLabel;
+  }
+
+  void _showLibraryError(String action, Object error) {
+    if (!mounted) return;
+    setState(() {
+      _messageText = 'Could not $action: $error';
+      _messageIsError = true;
+    });
+  }
+
+  Future<String?> _requestCharacterName({
+    required String title,
+    required String actionLabel,
+    required String initialValue,
+  }) async {
+    final controller = TextEditingController(text: initialValue);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLength: 80,
+          decoration: const InputDecoration(
+            labelText: 'Character name',
+            border: OutlineInputBorder(),
+          ),
+          onSubmitted: (value) {
+            final trimmed = value.trim();
+            if (trimmed.isNotEmpty) Navigator.pop(context, trimmed);
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final trimmed = controller.text.trim();
+              if (trimmed.isNotEmpty) Navigator.pop(context, trimmed);
+            },
+            child: Text(actionLabel),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    return result;
+  }
+
+  String _librarySlug(String value) {
+    final normalized = value
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+        .replaceAll(RegExp(r'^-+|-+$'), '');
+    return normalized.isEmpty ? 'untitled' : normalized;
   }
 
   Future<void> _loadFixture(String caseId) async {
@@ -817,6 +1262,7 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
     String? messageText,
     bool recordHistory = false,
   }) async {
+    _libraryDocumentHasNoLegacyState = false;
     final previousState = _currentState;
     if (recordHistory &&
         previousState != null &&
@@ -1188,6 +1634,213 @@ class _CharacterEditorShellState extends State<_CharacterEditorShell> {
 
   ValidationCaseDescriptor _fixtureDescriptorFor(String id) {
     return widget.tables.editorFixtures.firstWhere((item) => item.id == id);
+  }
+}
+
+class _CharacterLibraryBar extends StatelessWidget {
+  const _CharacterLibraryBar({
+    required this.characters,
+    required this.selectedCharacterId,
+    required this.onSelected,
+    required this.onAdd,
+    required this.onUpdate,
+    required this.onDuplicate,
+    required this.onRename,
+    required this.onDelete,
+  });
+
+  final Map<CharacterId, CharacterResource> characters;
+  final CharacterId? selectedCharacterId;
+  final ValueChanged<CharacterId> onSelected;
+  final VoidCallback? onAdd;
+  final VoidCallback? onUpdate;
+  final VoidCallback? onDuplicate;
+  final VoidCallback? onRename;
+  final VoidCallback? onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final entries = characters.values.toList()
+      ..sort((left, right) {
+        final name = left.name.toLowerCase().compareTo(
+          right.name.toLowerCase(),
+        );
+        return name != 0 ? name : left.id.compareTo(right.id);
+      });
+    final selected = characters.containsKey(selectedCharacterId)
+        ? selectedCharacterId
+        : null;
+    final selector = Row(
+      children: [
+        Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: const Color(0xFF00F5FF).withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: const Color(0xFF00F5FF).withValues(alpha: 0.28),
+            ),
+          ),
+          child: const Icon(
+            Icons.people_alt_outlined,
+            size: 18,
+            color: Color(0xFF65F7FF),
+          ),
+        ),
+        const SizedBox(width: 10),
+        const Text(
+          'PROJECT CAST',
+          style: TextStyle(
+            color: Color(0xFFB7C4D8),
+            fontFamily: 'Outfit',
+            fontWeight: FontWeight.w800,
+            fontSize: 11,
+            letterSpacing: 1.1,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<CharacterId>(
+              value: selected,
+              isExpanded: true,
+              hint: Text(
+                entries.isEmpty
+                    ? 'No project characters yet'
+                    : 'Select character',
+              ),
+              borderRadius: BorderRadius.circular(14),
+              items: [
+                for (final character in entries)
+                  DropdownMenuItem(
+                    value: character.id,
+                    child: Text(
+                      character.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+              ],
+              onChanged: (value) {
+                if (value != null) onSelected(value);
+              },
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+          decoration: BoxDecoration(
+            color: const Color(0xFF070B12).withValues(alpha: 0.48),
+            borderRadius: BorderRadius.circular(99),
+          ),
+          child: Text(
+            '${characters.length}',
+            style: const TextStyle(
+              color: Color(0xFF65F7FF),
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      ],
+    );
+    final actions = Wrap(
+      spacing: 4,
+      children: [
+        _LibraryAction(
+          tooltip: 'Add the current character to this project',
+          icon: Icons.person_add_alt_1_outlined,
+          onPressed: onAdd,
+        ),
+        _LibraryAction(
+          tooltip: 'Save current edits to the selected character',
+          icon: Icons.save_outlined,
+          onPressed: onUpdate,
+        ),
+        _LibraryAction(
+          tooltip: 'Duplicate selected character',
+          icon: Icons.copy_outlined,
+          onPressed: onDuplicate,
+        ),
+        _LibraryAction(
+          tooltip: 'Rename selected character',
+          icon: Icons.drive_file_rename_outline,
+          onPressed: onRename,
+        ),
+        _LibraryAction(
+          tooltip: 'Delete selected character',
+          icon: Icons.delete_outline,
+          destructive: true,
+          onPressed: onDelete,
+        ),
+      ],
+    );
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 6, 8, 6),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111827).withValues(alpha: 0.88),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF29364A)),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 780) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                selector,
+                const SizedBox(height: 4),
+                Align(alignment: Alignment.centerRight, child: actions),
+              ],
+            );
+          }
+          return Row(
+            children: [
+              Expanded(child: selector),
+              const SizedBox(width: 12),
+              actions,
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _LibraryAction extends StatelessWidget {
+  const _LibraryAction({
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+    this.destructive = false,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback? onPressed;
+  final bool destructive;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      visualDensity: VisualDensity.compact,
+      style: IconButton.styleFrom(
+        foregroundColor: destructive
+            ? const Color(0xFFFF8D99)
+            : const Color(0xFFC8D3E2),
+        disabledForegroundColor: const Color(0xFF5C6879),
+        backgroundColor: onPressed == null
+            ? Colors.transparent
+            : const Color(0xFF202B3C),
+        hoverColor: destructive
+            ? const Color(0xFF5C1F2B)
+            : const Color(0xFF2B3B51),
+      ),
+      icon: Icon(icon, size: 18),
+    );
   }
 }
 

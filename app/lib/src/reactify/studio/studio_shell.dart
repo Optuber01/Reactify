@@ -19,7 +19,7 @@ class _ReactifyStudioShellState extends State<ReactifyStudioShell> {
   late final StudioProjectController _projectController =
       StudioProjectController();
   late final List<Widget?> _pages = [
-    const _CharacterStudioPage(),
+    _CharacterStudioPage(controller: _projectController),
     ReactionComposer(controller: _projectController),
     null,
     TimelineWorkspace(controller: _projectController),
@@ -130,7 +130,9 @@ class _ReactifyStudioShellState extends State<ReactifyStudioShell> {
 }
 
 class _CharacterStudioPage extends StatelessWidget {
-  const _CharacterStudioPage();
+  const _CharacterStudioPage({required this.controller});
+
+  final StudioProjectController controller;
 
   @override
   Widget build(BuildContext context) {
@@ -145,7 +147,21 @@ class _CharacterStudioPage extends StatelessWidget {
         ),
         useMaterial3: true,
       ),
-      child: const CharacterCreatorScreen(),
+      child: AnimatedBuilder(
+        animation: controller,
+        builder: (context, _) {
+          return CharacterCreatorScreen(
+            characterLibrary: controller.project.characters,
+            selectedLibraryCharacterId: controller.selectedCharacterId,
+            onAddLibraryCharacter: controller.addCharacter,
+            onUpdateLibraryCharacter: controller.updateCharacter,
+            onSelectLibraryCharacter: controller.selectCharacter,
+            onDuplicateLibraryCharacter: controller.duplicateCharacter,
+            onRenameLibraryCharacter: controller.renameCharacter,
+            onDeleteLibraryCharacter: controller.deleteCharacter,
+          );
+        },
+      ),
     );
   }
 }

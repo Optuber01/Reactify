@@ -29,7 +29,11 @@ class GachaGameCanvas extends FlameGame {
 
   set scene(ResolvedScene? newScene) {
     if (_scene == newScene) return;
-    _scene = newScene;
+    if (newScene == null) {
+      _scene = null;
+      return;
+    }
+    updateFlatScene(newScene);
   }
 
   @override
@@ -195,6 +199,9 @@ class GachaGameCanvas extends FlameGame {
 
   AffineMatrix _viewportTransform(ResolvedScene scene) {
     final bounds = scene.canvasBounds ?? scene.worldBounds;
+    if (!hasLayout) {
+      return const AffineMatrix.identity();
+    }
     if (size.x <= 0 || size.y <= 0 || bounds.isEmpty) {
       return const AffineMatrix.identity();
     }

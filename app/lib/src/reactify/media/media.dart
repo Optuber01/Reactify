@@ -1,4 +1,9 @@
 export 'ffmpeg_backend.dart';
+export 'ffmpeg_export_executor.dart';
+export 'ffmpeg_progress.dart';
 export 'media_contracts.dart';
+export 'media_executor.dart';
 export 'media_render_plan.dart';
 export 'png_sequence_export.dart';
+export 'process_execution.dart';
+export 'timeline_media_evaluator.dart';

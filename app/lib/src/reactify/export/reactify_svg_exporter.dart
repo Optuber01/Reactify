@@ -528,7 +528,12 @@ class ReactifyPngExporter {
       }
       canvas.save();
       canvas.transform(part.localTransform.toFloat64List());
-      asset.paint(canvas, part.tintColor);
+      asset.paint(
+        canvas,
+        part.tintColor,
+        tintStrength: part.tintStrength,
+        opacity: part.opacity,
+      );
       canvas.restore();
     }
     return recorder.endRecording().toImage(

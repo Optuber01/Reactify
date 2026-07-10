@@ -57,6 +57,8 @@ class CharacterRenderer {
           localTransform: matrix,
           targetJoint: targetJoint,
           tintColor: TintPipeline.resolveTint(state, part.tintChannel),
+          tintStrength: _tintStrengthFor(part, state),
+          opacity: _opacityFor(part),
           globalDepth: _globalDepthFor(part, state),
         ),
       );
@@ -69,6 +71,9 @@ class CharacterRenderer {
 
   String _targetJointFor(RenderCatalogPart part) {
     final scope = part.hostScope.toLowerCase();
+    if (scope == 'character') {
+      return 'torso';
+    }
     if (scope == 'head') {
       return 'head';
     }
@@ -85,6 +90,17 @@ class CharacterRenderer {
     RenderCatalogPart part,
     GachaCharacterState state,
   ) {
+    if (part.hostScope == 'character') {
+      final poseRoot = GachaPoseGraph.worldTransforms(
+        tables,
+        state.numeric('pose'),
+      )['torso']!;
+      return poseRoot
+          .inverse()
+          .multiply(_characterWrapperMatrix(part))
+          .multiply(_characterSlotAdjustment(part, state))
+          .multiply(part.localMatrix);
+    }
     final groupMatrix = _groupAdjustmentFor(part, state);
     final headPlacement = part.hostScope == 'head'
         ? tables.headPlacementFor(
@@ -110,6 +126,16 @@ class CharacterRenderer {
   }
 
   int _globalDepthFor(RenderCatalogPart part, GachaCharacterState state) {
+    if (part.hostScope == 'character') {
+      return switch (part.hostName) {
+        'fx2' => -(1 << 60) + part.orderedPartIndex,
+        'shadow' => -(1 << 59) + part.orderedPartIndex,
+        'fx' => (1 << 60) + part.orderedPartIndex,
+        _ => throw StateError(
+          'Unsupported character wrapper ${part.hostName} for ${part.family}.',
+        ),
+      };
+    }
     final poseDepth =
         tables
             .posePlacementFor(
@@ -134,6 +160,75 @@ class CharacterRenderer {
     return poseDepth * 1000000000 +
         _depthPathOrder(_combinedPoseDepthPath(part)) * 10 +
         part.orderedPartIndex;
+  }
+
+  AffineMatrix _characterWrapperMatrix(RenderCatalogPart part) {
+    if (part.hostName == 'shadow') {
+      return AffineMatrix.translation(-1.3, -0.2);
+    }
+    if (part.hostName == 'fx' || part.hostName == 'fx2') {
+      return const AffineMatrix.identity();
+    }
+    throw StateError(
+      'Unsupported character wrapper ${part.hostName} for ${part.family}.',
+    );
+  }
+
+  AffineMatrix _characterSlotAdjustment(
+    RenderCatalogPart part,
+    GachaCharacterState state,
+  ) {
+    if (part.hostName == 'shadow') {
+      return const AffineMatrix.identity();
+    }
+    final suffix = part.hostName == 'fx2' ? '2x' : '';
+    final scaleXField = 'specialsizex$suffix';
+    final scaleYField = 'specialsizey$suffix';
+    final xField = suffix.isEmpty ? 'specialxpos' : 'specialxpos2x';
+    final yField = suffix.isEmpty ? 'specialypos' : 'specialypos2x';
+    final rotationField = suffix.isEmpty ? 'specialrot' : 'specialrot2x';
+    final scaleX = tables.runtimeValueMaps.resolve(
+      field: scaleXField,
+      fieldValue: state.numeric(scaleXField),
+      op: 'scaleX',
+      targetContains: part.hostName,
+      fallback: 1,
+    );
+    final scaleY = tables.runtimeValueMaps.resolve(
+      field: scaleYField,
+      fieldValue: state.numeric(scaleYField),
+      op: 'scaleY',
+      targetContains: part.hostName,
+      fallback: 1,
+    );
+    return AffineMatrix.rotationDegrees(state.numeric(rotationField).toDouble())
+        .multiply(
+          AffineMatrix.translation(
+            state.numeric(xField).toDouble(),
+            state.numeric(yField).toDouble(),
+          ),
+        )
+        .multiply(AffineMatrix.scale(scaleX, scaleY));
+  }
+
+  double _tintStrengthFor(RenderCatalogPart part, GachaCharacterState state) {
+    if (part.hostName == 'fx') {
+      return (state.numeric('specialtint').clamp(0, 20) / 20).toDouble();
+    }
+    if (part.hostName == 'fx2') {
+      return (state.numeric('specialtint2x').clamp(0, 20) / 20).toDouble();
+    }
+    return 1;
+  }
+
+  double _opacityFor(RenderCatalogPart part) {
+    if (part.hostName != 'shadow') {
+      return 1;
+    }
+    final match = RegExp(
+      r'(?:^|;)\s*alpha=([0-9.]+)(?:;|$)',
+    ).firstMatch(part.notes);
+    return double.tryParse(match?.group(1) ?? '')?.clamp(0, 1).toDouble() ?? 1;
   }
 
   String _combinedPoseDepthPath(RenderCatalogPart part) {
@@ -659,9 +754,6 @@ class CharacterRenderer {
     if (parts.isEmpty) {
       warnings.add('No renderable head parts resolved for this case.');
     }
-    if (state.numeric('special') > 0 || state.numeric('special2x') > 0) {
-      warnings.add('Special effects are not rendered yet.');
-    }
     final normalizedPose = tables.normalizePose(state.numeric('pose'));
     if (normalizedPose != state.numeric('pose')) {
       warnings.add(
@@ -725,11 +817,18 @@ class RasterPreparedAsset extends PreparedAsset {
   static const double _rasterExportScale = 10;
 
   @override
-  void paint(ui.Canvas canvas, ui.Color? tintColor) {
-    final paint = ui.Paint();
-    if (tintColor != null) {
-      paint.colorFilter = ui.ColorFilter.mode(tintColor, ui.BlendMode.srcIn);
-    }
+  void paint(
+    ui.Canvas canvas,
+    ui.Color? tintColor, {
+    double tintStrength = 1,
+    double opacity = 1,
+  }) {
+    final paint = ui.Paint()
+      ..colorFilter = _colorTransform(
+        tintColor,
+        tintStrength: tintStrength,
+        opacity: opacity,
+      );
     canvas.drawImageRect(
       image,
       ui.Rect.fromLTWH(0, 0, image.width.toDouble(), image.height.toDouble()),
@@ -746,20 +845,62 @@ class SvgPreparedAsset extends PreparedAsset {
   final vg.PictureInfo pictureInfo;
 
   @override
-  void paint(ui.Canvas canvas, ui.Color? tintColor) {
+  void paint(
+    ui.Canvas canvas,
+    ui.Color? tintColor, {
+    double tintStrength = 1,
+    double opacity = 1,
+  }) {
     final bounds = ui.Rect.fromLTWH(0, 0, size.width, size.height);
-    if (tintColor != null) {
-      canvas.saveLayer(
-        bounds,
-        ui.Paint()
-          ..colorFilter = ui.ColorFilter.mode(tintColor, ui.BlendMode.srcIn),
-      );
+    final colorTransform = _colorTransform(
+      tintColor,
+      tintStrength: tintStrength,
+      opacity: opacity,
+    );
+    if (colorTransform != null) {
+      canvas.saveLayer(bounds, ui.Paint()..colorFilter = colorTransform);
       canvas.drawPicture(pictureInfo.picture);
       canvas.restore();
       return;
     }
     canvas.drawPicture(pictureInfo.picture);
   }
+}
+
+ui.ColorFilter? _colorTransform(
+  ui.Color? tintColor, {
+  required double tintStrength,
+  required double opacity,
+}) {
+  final strength = tintColor == null ? 0.0 : tintStrength.clamp(0.0, 1.0);
+  final alpha = opacity.clamp(0.0, 1.0);
+  if (strength == 0 && alpha == 1) {
+    return null;
+  }
+  final argb = tintColor?.toARGB32() ?? 0;
+  final keep = 1 - strength;
+  return ui.ColorFilter.matrix([
+    keep,
+    0,
+    0,
+    0,
+    ((argb >> 16) & 0xff) * strength,
+    0,
+    keep,
+    0,
+    0,
+    ((argb >> 8) & 0xff) * strength,
+    0,
+    0,
+    keep,
+    0,
+    (argb & 0xff) * strength,
+    0,
+    0,
+    0,
+    alpha,
+    0,
+  ]);
 }
 
 class _SlotBinding {

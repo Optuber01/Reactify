@@ -61,6 +61,8 @@ class GachaToReactifyAdapter {
         'legacyLeafId': catalog.leafId,
         'legacyOriginalAssetPath': catalog.originalAssetPath,
         'legacyTintChannel': catalog.tintChannel,
+        'legacyTintStrength': part.tintStrength,
+        'legacyOpacity': part.opacity,
         'legacyVisibilityRule': catalog.visibilityRule,
         'legacyHostScope': catalog.hostScope,
         'legacyHostName': catalog.hostName,

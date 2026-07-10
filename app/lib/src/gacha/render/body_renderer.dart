@@ -32,6 +32,8 @@ class _FamilySelection {
 }
 
 const List<_FamilySelection> _selections = [
+  _FamilySelection('special_back', _special2),
+  _FamilySelection('ground_shadow', _shadow),
   _FamilySelection('body_base', _fixedOne),
   _FamilySelection('body_pants', _pants1),
   _FamilySelection('body_shirt', _shirt),
@@ -80,6 +82,7 @@ const List<_FamilySelection> _selections = [
   _FamilySelection('shield', _shield),
   _FamilySelection('weapon_back', _weapon2),
   _FamilySelection('weapon_front', _weapon1),
+  _FamilySelection('special_front', _special),
 ];
 
 int _fixedOne(GachaCharacterState _) => 1;
@@ -115,3 +118,6 @@ int _hand2(GachaCharacterState state) => state.numeric('hand2x');
 int _knee1(GachaCharacterState state) => state.numeric('knee1x');
 int _knee2(GachaCharacterState state) => state.numeric('knee2x');
 int _logo(GachaCharacterState state) => state.numeric('logo');
+int _shadow(GachaCharacterState state) => state.numeric('shadow');
+int _special(GachaCharacterState state) => state.numeric('special');
+int _special2(GachaCharacterState state) => state.numeric('special2x');

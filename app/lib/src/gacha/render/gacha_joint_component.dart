@@ -152,7 +152,9 @@ class GachaPartComponent extends PositionComponent {
     AffineMatrix newLocalMatrix,
   ) {
     if (part.catalogPart.appAssetPath != newPart.catalogPart.appAssetPath ||
-        tintColor != newPart.tintColor) {
+        tintColor != newPart.tintColor ||
+        part.tintStrength != newPart.tintStrength ||
+        part.opacity != newPart.opacity) {
       _cachedGpuImage = null;
       _cachedGpuSourceRect = null;
       _cachedGpuDestinationRect = null;
@@ -179,27 +181,32 @@ class GachaPartComponent extends PositionComponent {
     }
     _loadingCache = true;
     final serial = ++_cacheSerial;
-    GachaVectorCache.instance.getRasterized(currentAsset, tintColor).then((
-      image,
-    ) {
-      if (serial != _cacheSerial || asset != currentAsset) {
-        return;
-      }
-      _cachedGpuImage = image;
-      _cachedGpuSourceRect = Rect.fromLTWH(
-        0,
-        0,
-        image.width.toDouble(),
-        image.height.toDouble(),
-      );
-      _cachedGpuDestinationRect = Rect.fromLTWH(
-        0,
-        0,
-        currentAsset.size.width,
-        currentAsset.size.height,
-      );
-      _loadingCache = false;
-    });
+    GachaVectorCache.instance
+        .getRasterized(
+          currentAsset,
+          tintColor,
+          tintStrength: part.tintStrength,
+          opacity: part.opacity,
+        )
+        .then((image) {
+          if (serial != _cacheSerial || asset != currentAsset) {
+            return;
+          }
+          _cachedGpuImage = image;
+          _cachedGpuSourceRect = Rect.fromLTWH(
+            0,
+            0,
+            image.width.toDouble(),
+            image.height.toDouble(),
+          );
+          _cachedGpuDestinationRect = Rect.fromLTWH(
+            0,
+            0,
+            currentAsset.size.width,
+            currentAsset.size.height,
+          );
+          _loadingCache = false;
+        });
   }
 
   @override
@@ -217,7 +224,12 @@ class GachaPartComponent extends PositionComponent {
         _paint,
       );
     } else {
-      asset!.paint(canvas, tintColor);
+      asset!.paint(
+        canvas,
+        tintColor,
+        tintStrength: part.tintStrength,
+        opacity: part.opacity,
+      );
     }
 
     canvas.restore();

@@ -10,6 +10,8 @@ class ResolvedRenderPart {
     required this.targetJoint,
     required this.tintColor,
     required this.globalDepth,
+    this.tintStrength = 1,
+    this.opacity = 1,
     this.sceneTransform = const AffineMatrix.identity(),
   });
 
@@ -17,6 +19,8 @@ class ResolvedRenderPart {
   final AffineMatrix localTransform;
   final String targetJoint;
   final Color? tintColor;
+  final double tintStrength;
+  final double opacity;
   final int globalDepth;
   final AffineMatrix sceneTransform;
 
@@ -38,6 +42,8 @@ class ResolvedRenderPart {
       'sceneTransform': sceneTransform.toDebugJson(),
       'targetJoint': targetJoint,
       'depth': globalDepth,
+      'tintStrength': tintStrength,
+      'opacity': opacity,
     };
   }
 }
@@ -62,5 +68,10 @@ abstract class PreparedAsset {
   final String assetPath;
   final Size size;
 
-  void paint(Canvas canvas, Color? tintColor);
+  void paint(
+    Canvas canvas,
+    Color? tintColor, {
+    double tintStrength = 1,
+    double opacity = 1,
+  });
 }

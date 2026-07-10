@@ -113,6 +113,8 @@ class ReactifyRenderBridge {
               localTransform: flattened,
               targetJoint: 'torso',
               tintColor: basePart.tintColor,
+              tintStrength: basePart.tintStrength,
+              opacity: basePart.opacity,
               globalDepth:
                   (sceneDepths[sceneCharacter.id] ?? 0) + basePart.globalDepth,
             ),
@@ -215,6 +217,12 @@ class ReactifyRenderBridge {
       tintColor: slot.tintChannels.isEmpty
           ? null
           : slot.tintChannels.first.color,
+      tintStrength: _metadataDouble(
+        slot.metadata,
+        'legacyTintStrength',
+        fallback: 1,
+      ),
+      opacity: _metadataDouble(slot.metadata, 'legacyOpacity', fallback: 1),
       globalDepth: slot.depth,
     );
   }
@@ -478,9 +486,14 @@ class ReactifyDrawingPreparedAsset extends PreparedAsset {
   late final Offset _offset;
 
   @override
-  void paint(Canvas canvas, Color? tintColor) {
+  void paint(
+    Canvas canvas,
+    Color? tintColor, {
+    double tintStrength = 1,
+    double opacity = 1,
+  }) {
     final paint = Paint()
-      ..color = tintColor ?? color
+      ..color = (tintColor ?? color).withValues(alpha: opacity)
       ..strokeWidth = strokeWidth
       ..strokeCap = StrokeCap.round
       ..strokeJoin = StrokeJoin.round

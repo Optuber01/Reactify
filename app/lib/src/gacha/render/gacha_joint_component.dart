@@ -209,10 +209,6 @@ class GachaPartComponent extends PositionComponent {
 
     canvas.transform(_cachedLocalMatrixList);
 
-    final anchorX = part.catalogPart.runtimeAnchorX;
-    final anchorY = part.catalogPart.runtimeAnchorY;
-    canvas.translate(anchorX, anchorY);
-
     if (_cachedGpuImage != null) {
       canvas.drawImageRect(
         _cachedGpuImage!,

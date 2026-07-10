@@ -142,7 +142,13 @@ class ReactifyRenderBridge {
       if (character == null) {
         continue;
       }
-      resolved.addAll(resolveCharacterParts(character, sceneCharacter));
+      resolved.addAll(
+        resolveCharacterParts(
+          character,
+          sceneCharacter,
+          scene.cameraTransform.multiply(sceneCharacter.transform),
+        ),
+      );
     }
     resolved.sort((left, right) {
       final depthCompare = left.globalDepth.compareTo(right.globalDepth);
@@ -155,6 +161,7 @@ class ReactifyRenderBridge {
   List<ResolvedRenderPart> resolveCharacterParts(
     ReactifyCharacterDocument character, [
     ReactifySceneCharacter? sceneCharacter,
+    AffineMatrix? resolvedSceneTransform,
   ]) {
     final slotsById = {for (final slot in character.slots) slot.id: slot};
     final semanticOverrides = <String, ReactifySlotOverride>{};
@@ -168,7 +175,9 @@ class ReactifyRenderBridge {
       }
     }
     final sceneTransform =
-        sceneCharacter?.transform ?? const AffineMatrix.identity();
+        resolvedSceneTransform ??
+        sceneCharacter?.transform ??
+        const AffineMatrix.identity();
     final parts = <ResolvedRenderPart>[];
     for (final baseSlot in character.renderableSlots) {
       final semanticOverride = semanticOverrides[baseSlot.id];
@@ -302,7 +311,11 @@ class ReactifyRenderBridge {
         continue;
       }
       final anchorWorld = _anchorWorldTransforms(character.rig);
-      for (final part in resolveCharacterParts(character, sceneCharacter)) {
+      for (final part in resolveCharacterParts(
+        character,
+        sceneCharacter,
+        scene.cameraTransform.multiply(sceneCharacter.transform),
+      )) {
         final asset = assets[part.catalogPart.appAssetPath];
         if (asset == null) {
           continue;

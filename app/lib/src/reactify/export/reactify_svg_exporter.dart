@@ -528,10 +528,6 @@ class ReactifyPngExporter {
       }
       canvas.save();
       canvas.transform(part.localTransform.toFloat64List());
-      canvas.translate(
-        part.catalogPart.runtimeAnchorX,
-        part.catalogPart.runtimeAnchorY,
-      );
       asset.paint(canvas, part.tintColor);
       canvas.restore();
     }

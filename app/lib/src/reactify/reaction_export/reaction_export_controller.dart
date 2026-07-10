@@ -3,6 +3,7 @@ import '../render/reactify_render_bridge.dart';
 import 'artifact_writer.dart';
 import 'reactify_reaction_state_renderer.dart';
 import 'reaction_export_job.dart';
+import 'reaction_media_frame.dart';
 import 'reaction_export_models.dart';
 import 'reaction_export_planner.dart';
 
@@ -14,10 +15,12 @@ class ReactionExportController {
 
   factory ReactionExportController.production({
     required ReactifyRenderBridge bridge,
+    ReactionMediaFrameResolver? mediaFrameResolver,
   }) {
     return ReactionExportController(
       renderer: ReactifyReactionStateRenderer(
         pngExporter: ReactifyPngExporter(bridge: bridge),
+        mediaFrameResolver: mediaFrameResolver,
       ),
     );
   }

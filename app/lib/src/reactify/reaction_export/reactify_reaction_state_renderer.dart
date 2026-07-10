@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import '../../gacha/render/transform_graph.dart';
+import '../../gacha/render/render_part.dart';
 import '../export/reactify_svg_exporter.dart';
 import '../media/media.dart';
 import '../model/reactify_document.dart';
@@ -10,6 +11,7 @@ import '../text/project_text_adapter.dart';
 import '../text/reaction_text_renderer.dart';
 import 'reaction_dialogue_selection.dart';
 import 'reaction_export_models.dart';
+import 'reaction_media_frame.dart';
 
 class ReactionDialogueOverlay {
   const ReactionDialogueOverlay({
@@ -34,9 +36,13 @@ class ReactionDialogueOverlay {
 }
 
 class ReactifyReactionStateRenderer implements ReactionStateRenderer {
-  const ReactifyReactionStateRenderer({required this.pngExporter});
+  const ReactifyReactionStateRenderer({
+    required this.pngExporter,
+    this.mediaFrameResolver,
+  });
 
   final ReactifyPngExporter pngExporter;
+  final ReactionMediaFrameResolver? mediaFrameResolver;
 
   @override
   Future<RenderedReactionArtifact> render(
@@ -67,6 +73,7 @@ class ReactifyReactionStateRenderer implements ReactionStateRenderer {
       );
     }
     final canvas = request.timeline?.canvas ?? request.project.canvasDefaults;
+    final backgroundCharacters = <_LayeredSceneCharacter>[];
     final sceneCharacters = <_LayeredSceneCharacter>[];
     final nativeCharacters = <String, ReactifyCharacterDocument>{};
     if (request.composition == ReactionExportComposition.composited) {
@@ -80,7 +87,7 @@ class ReactifyReactionStateRenderer implements ReactionStateRenderer {
           layer: -0x3fffffff,
           canvas: canvas,
           fitCanvas: true,
-          sceneCharacters: sceneCharacters,
+          sceneCharacters: backgroundCharacters,
           nativeCharacters: nativeCharacters,
         );
       }
@@ -189,23 +196,42 @@ class ReactifyReactionStateRenderer implements ReactionStateRenderer {
       characters: [for (final entry in sceneCharacters) entry.character],
       metadata: {'contentKey': request.contentKey, 'stateId': request.state.id},
     );
+    final backgroundScene = backgroundCharacters.isEmpty
+        ? null
+        : ReactifySceneDocument(
+            id: 'reaction.${request.contentKey}.background',
+            name: '${request.state.name} Background',
+            canvasSize: scene.canvasSize,
+            cameraTransform: scene.cameraTransform,
+            characters: [
+              for (final entry in backgroundCharacters) entry.character,
+            ],
+          );
     final backgroundColor =
         request.composition == ReactionExportComposition.composited
         ? _color(canvas.backgroundColor)
         : null;
     final dialogue = dialogueOverlays(request);
+    final media = await _resolveMediaOverlay(
+      request,
+      layout,
+      canvas,
+      cancellation,
+    );
     Uint8List pngBytes;
     try {
-      pngBytes = dialogue.isEmpty
+      pngBytes = dialogue.isEmpty && media == null && backgroundScene == null
           ? await pngExporter.exportScene(
               scene,
               nativeCharacters,
               backgroundColor: backgroundColor,
             )
-          : await _exportSceneWithDialogue(
+          : await _exportLayeredScene(
+              backgroundScene,
               scene,
               nativeCharacters,
               backgroundColor,
+              media,
               dialogue,
             );
     } on MediaFailure {
@@ -220,6 +246,8 @@ class ReactifyReactionStateRenderer implements ReactionStateRenderer {
           'contentKey': request.contentKey,
         },
       );
+    } finally {
+      media?.dispose();
     }
     cancellation.throwIfCancelled();
     if (!_isPng(pngBytes)) {
@@ -301,26 +329,46 @@ class ReactifyReactionStateRenderer implements ReactionStateRenderer {
     return List.unmodifiable(overlays);
   }
 
-  Future<Uint8List> _exportSceneWithDialogue(
-    ReactifySceneDocument scene,
+  Future<Uint8List> _exportLayeredScene(
+    ReactifySceneDocument? backgroundScene,
+    ReactifySceneDocument foregroundScene,
     Map<String, ReactifyCharacterDocument> characters,
     ui.Color? backgroundColor,
+    _ResolvedMediaOverlay? media,
     List<ReactionDialogueOverlay> overlays,
   ) async {
-    final resolved = await pngExporter.bridge.buildRenderableScene(
-      scene,
+    final foregroundResolved = await pngExporter.bridge.buildRenderableScene(
+      foregroundScene,
       characters,
     );
-    final baseImage = await ReactifyPngExporter.renderResolvedScene(
-      resolved,
-      scene.canvasSize,
-      backgroundColor: backgroundColor,
+    final foregroundImage = await ReactifyPngExporter.renderResolvedScene(
+      foregroundResolved,
+      foregroundScene.canvasSize,
     );
+    ui.Image? backgroundImage;
     ui.Image? outputImage;
     try {
+      if (backgroundScene != null) {
+        final backgroundResolved = await pngExporter.bridge
+            .buildRenderableScene(backgroundScene, characters);
+        backgroundImage = await ReactifyPngExporter.renderResolvedScene(
+          backgroundResolved,
+          backgroundScene.canvasSize,
+          backgroundColor: backgroundColor,
+        );
+      }
       final recorder = ui.PictureRecorder();
       final canvas = ui.Canvas(recorder);
-      canvas.drawImage(baseImage, ui.Offset.zero, ui.Paint());
+      if (backgroundImage != null) {
+        canvas.drawImage(backgroundImage, ui.Offset.zero, ui.Paint());
+      } else if (backgroundColor != null) {
+        canvas.drawRect(
+          ui.Offset.zero & foregroundScene.canvasSize,
+          ui.Paint()..color = backgroundColor,
+        );
+      }
+      media?.paint(canvas);
+      canvas.drawImage(foregroundImage, ui.Offset.zero, ui.Paint());
       const textRenderer = ReactionTextBlockRenderer();
       for (final overlay in overlays) {
         if (overlay.opacity <= 0) continue;
@@ -346,8 +394,8 @@ class ReactifyReactionStateRenderer implements ReactionStateRenderer {
         canvas.restore();
       }
       outputImage = await recorder.endRecording().toImage(
-        scene.canvasSize.width.toInt(),
-        scene.canvasSize.height.toInt(),
+        foregroundScene.canvasSize.width.toInt(),
+        foregroundScene.canvasSize.height.toInt(),
       );
       final data = await outputImage.toByteData(format: ui.ImageByteFormat.png);
       if (data == null) {
@@ -358,7 +406,8 @@ class ReactifyReactionStateRenderer implements ReactionStateRenderer {
       }
       return data.buffer.asUint8List();
     } finally {
-      baseImage.dispose();
+      backgroundImage?.dispose();
+      foregroundImage.dispose();
       outputImage?.dispose();
     }
   }
@@ -370,15 +419,6 @@ class ReactifyReactionStateRenderer implements ReactionStateRenderer {
         message:
             'Unstructured reaction-state dialogue metadata is not supported.',
         context: {'stateId': request.state.id},
-      );
-    }
-    final media = request.state.media;
-    if (request.includeMedia && media.visible && media.assetId != null) {
-      throw MediaFailure(
-        code: MediaFailureCode.unsupportedCapability,
-        message:
-            'Reaction-state PNG media-region compositing is not supported.',
-        context: {'stateId': request.state.id, 'assetId': media.assetId},
       );
     }
     if (request.timeline?.layoutOverrides.isNotEmpty == true) {
@@ -885,6 +925,299 @@ class ReactifyReactionStateRenderer implements ReactionStateRenderer {
     );
   }
 
+  Future<_ResolvedMediaOverlay?> _resolveMediaOverlay(
+    ReactionRenderRequest request,
+    LayoutTemplate layout,
+    ProjectCanvas canvas,
+    ExportCancellationToken cancellation,
+  ) async {
+    final configuration = request.state.media;
+    if (!request.includeMedia ||
+        request.event?.clip.showMedia == false ||
+        !configuration.visible ||
+        configuration.assetId == null) {
+      return null;
+    }
+    cancellation.throwIfCancelled();
+    final assetId = configuration.assetId!;
+    final asset = request.project.assets[assetId];
+    if (asset == null || asset.missing || asset.uri.trim().isEmpty) {
+      throw MediaFailure(
+        code: MediaFailureCode.sourceMissing,
+        message: 'The reacted-to media asset is missing.',
+        context: {'stateId': request.state.id, 'assetId': assetId},
+      );
+    }
+    final region = layout.mediaRegion;
+    if (region == null) {
+      throw MediaFailure(
+        code: MediaFailureCode.invalidRequest,
+        message: 'Reacted-to media requires a layout media region.',
+        context: {'stateId': request.state.id, 'layoutId': layout.id},
+      );
+    }
+    final bounds = _mediaBounds(region, canvas, request.state.id);
+    final crop =
+        configuration.crop ??
+        const NormalizedRect(left: 0, top: 0, width: 1, height: 1);
+    _validateMediaCrop(crop, request.state.id);
+    if (!configuration.opacity.isFinite ||
+        configuration.opacity < 0 ||
+        configuration.opacity > 1) {
+      throw MediaFailure(
+        code: MediaFailureCode.invalidRequest,
+        message: 'Reacted-to media opacity must be between zero and one.',
+        context: {'stateId': request.state.id},
+      );
+    }
+    final frameIdentity =
+        request.mediaFrameIdentity ??
+        _defaultMediaFrameIdentity(request, asset);
+    final _MediaSurface surface;
+    switch (asset.kind) {
+      case ProjectAssetKind.image ||
+          ProjectAssetKind.svg ||
+          ProjectAssetKind.drawing:
+        surface = await _staticMediaSurface(asset, canvas);
+      case ProjectAssetKind.video:
+        surface = await _videoMediaSurface(
+          request,
+          asset,
+          frameIdentity,
+          bounds,
+          cancellation,
+        );
+      default:
+        throw MediaFailure(
+          code: MediaFailureCode.unsupportedFormat,
+          message: 'The reacted-to media asset format is unsupported.',
+          context: {'assetId': asset.id, 'kind': asset.kind.name},
+        );
+    }
+    try {
+      cancellation.throwIfCancelled();
+      if (surface.width <= 0 ||
+          surface.height <= 0 ||
+          !surface.width.isFinite ||
+          !surface.height.isFinite) {
+        throw MediaFailure(
+          code: MediaFailureCode.sourceUnreadable,
+          message: 'The reacted-to media frame has invalid dimensions.',
+          context: {'assetId': asset.id},
+        );
+      }
+      return _ResolvedMediaOverlay(
+        surface: surface,
+        bounds: bounds,
+        crop: crop,
+        transform: _matrix(configuration.transform),
+        opacity: configuration.opacity,
+        frameIdentity: frameIdentity,
+      );
+    } catch (_) {
+      surface.dispose();
+      rethrow;
+    }
+  }
+
+  Future<_MediaSurface> _staticMediaSurface(
+    ProjectAsset asset,
+    ProjectCanvas canvas,
+  ) async {
+    final sceneCharacters = <_LayeredSceneCharacter>[];
+    final characters = <String, ReactifyCharacterDocument>{};
+    _addAssetLayer(
+      project: ReactifyProjectDocument(
+        id: 'media-surface',
+        name: 'Media Surface',
+        canvasDefaults: canvas,
+        assets: {asset.id: asset},
+      ),
+      assetId: asset.id,
+      sceneId: 'media.${asset.id}',
+      layer: 0,
+      canvas: canvas,
+      fitCanvas: false,
+      sceneCharacters: sceneCharacters,
+      nativeCharacters: characters,
+    );
+    final scene = ReactifySceneDocument(
+      id: 'media.${asset.id}',
+      name: asset.name,
+      canvasSize: ui.Size(canvas.width.toDouble(), canvas.height.toDouble()),
+      characters: [for (final entry in sceneCharacters) entry.character],
+    );
+    final resolved = await pngExporter.bridge.buildRenderableScene(
+      scene,
+      characters,
+    );
+    if (resolved.parts.length != 1) {
+      throw MediaFailure(
+        code: MediaFailureCode.sourceUnreadable,
+        message: 'The reacted-to media asset did not resolve to one image.',
+        context: {'assetId': asset.id},
+      );
+    }
+    final part = resolved.parts.single;
+    final prepared = resolved.assets[part.catalogPart.appAssetPath];
+    if (prepared == null) {
+      throw MediaFailure(
+        code: MediaFailureCode.sourceUnreadable,
+        message: 'The reacted-to media asset could not be prepared.',
+        context: {'assetId': asset.id},
+      );
+    }
+    return _PreparedMediaSurface(prepared, part);
+  }
+
+  Future<_MediaSurface> _videoMediaSurface(
+    ReactionRenderRequest request,
+    ProjectAsset asset,
+    String frameIdentity,
+    ui.Rect bounds,
+    ExportCancellationToken cancellation,
+  ) async {
+    final resolver = mediaFrameResolver;
+    if (resolver == null) {
+      throw MediaFailure(
+        code: MediaFailureCode.unsupportedCapability,
+        message: 'Video reaction media requires a configured frame resolver.',
+        context: {'assetId': asset.id},
+      );
+    }
+    final sourceFrame = request.event?.clip.range.start.frame ?? 0;
+    final sourceTimestamp = _mediaTimestamp(request, sourceFrame);
+    ReactionMediaFrame frame;
+    try {
+      frame = await resolver.resolve(
+        ReactionMediaFrameRequest(
+          asset: asset,
+          frameIdentity: frameIdentity,
+          sourceFrame: sourceFrame,
+          sourceTimestamp: sourceTimestamp,
+          targetWidth: bounds.width.ceil().clamp(1, 16384).toInt(),
+          targetHeight: bounds.height.ceil().clamp(1, 16384).toInt(),
+          event: request.event,
+        ),
+        cancellation,
+      );
+    } on MediaFailure {
+      rethrow;
+    } catch (error) {
+      throw MediaFailure(
+        code: MediaFailureCode.decodeFailed,
+        message: 'The reacted-to video frame resolver failed.',
+        cause: error,
+        context: {'assetId': asset.id, 'frameIdentity': frameIdentity},
+      );
+    }
+    cancellation.throwIfCancelled();
+    if (frame.identity != frameIdentity || !_isPng(frame.pngBytes)) {
+      throw MediaFailure(
+        code: MediaFailureCode.decodeFailed,
+        message: 'The reacted-to video resolver returned the wrong frame.',
+        context: {
+          'assetId': asset.id,
+          'expectedIdentity': frameIdentity,
+          'actualIdentity': frame.identity,
+        },
+      );
+    }
+    final codec = await ui.instantiateImageCodec(frame.pngBytes);
+    try {
+      final decoded = await codec.getNextFrame();
+      return _ImageMediaSurface(decoded.image);
+    } finally {
+      codec.dispose();
+    }
+  }
+
+  String _defaultMediaFrameIdentity(
+    ReactionRenderRequest request,
+    ProjectAsset asset,
+  ) {
+    if (asset.kind != ProjectAssetKind.video) {
+      return ReactionContentKey.fromJsonValue({
+        'assetId': asset.id,
+        'contentHash': asset.contentHash,
+        'uri': asset.uri,
+      }).value;
+    }
+    final frame = request.event?.clip.range.start.frame ?? 0;
+    final canvas = request.timeline?.canvas ?? request.project.canvasDefaults;
+    final region = request.project.layouts[request.state.layoutId]?.mediaRegion;
+    return ReactionContentKey.fromJsonValue({
+      'assetId': asset.id,
+      'contentHash': asset.contentHash,
+      'uri': asset.uri,
+      'frame': frame,
+      'timestampMicroseconds': _mediaTimestamp(request, frame).inMicroseconds,
+      'eventId': request.event?.eventId,
+      'targetWidth': region == null
+          ? null
+          : (region.width * canvas.width).ceil(),
+      'targetHeight': region == null
+          ? null
+          : (region.height * canvas.height).ceil(),
+    }).value;
+  }
+
+  Duration _mediaTimestamp(ReactionRenderRequest request, int frame) {
+    final rate = request.timeline?.frameRate;
+    if (rate == null) return Duration.zero;
+    return Duration(
+      microseconds:
+          frame *
+          rate.denominator *
+          Duration.microsecondsPerSecond ~/
+          rate.numerator,
+    );
+  }
+
+  ui.Rect _mediaBounds(
+    NormalizedRect region,
+    ProjectCanvas canvas,
+    String stateId,
+  ) {
+    final values = [region.left, region.top, region.width, region.height];
+    if (values.any((value) => !value.isFinite) ||
+        region.left < 0 ||
+        region.top < 0 ||
+        region.width <= 0 ||
+        region.height <= 0 ||
+        region.left + region.width > 1 ||
+        region.top + region.height > 1) {
+      throw MediaFailure(
+        code: MediaFailureCode.invalidRequest,
+        message: 'The layout media region must be normalized and in bounds.',
+        context: {'stateId': stateId},
+      );
+    }
+    return ui.Rect.fromLTWH(
+      region.left * canvas.width,
+      region.top * canvas.height,
+      region.width * canvas.width,
+      region.height * canvas.height,
+    );
+  }
+
+  void _validateMediaCrop(NormalizedRect crop, String stateId) {
+    final values = [crop.left, crop.top, crop.width, crop.height];
+    if (values.any((value) => !value.isFinite) ||
+        crop.left < 0 ||
+        crop.top < 0 ||
+        crop.width <= 0 ||
+        crop.height <= 0 ||
+        crop.left + crop.width > 1 ||
+        crop.top + crop.height > 1) {
+      throw MediaFailure(
+        code: MediaFailureCode.invalidRequest,
+        message: 'Reacted-to media crop must be normalized and in bounds.',
+        context: {'stateId': stateId},
+      );
+    }
+  }
+
   void _addAssetLayer({
     required ReactifyProjectDocument project,
     required String assetId,
@@ -1035,6 +1368,106 @@ class _LayeredSceneCharacter {
   final int layer;
   final int sourceIndex;
   final ReactifySceneCharacter character;
+}
+
+class _ResolvedMediaOverlay {
+  const _ResolvedMediaOverlay({
+    required this.surface,
+    required this.bounds,
+    required this.crop,
+    required this.transform,
+    required this.opacity,
+    required this.frameIdentity,
+  });
+
+  final _MediaSurface surface;
+  final ui.Rect bounds;
+  final NormalizedRect crop;
+  final AffineMatrix transform;
+  final double opacity;
+  final String frameIdentity;
+
+  void paint(ui.Canvas canvas) {
+    if (opacity <= 0) return;
+    canvas.save();
+    canvas.clipRect(bounds);
+    canvas.transform(transform.toFloat64List());
+    canvas.translate(bounds.left, bounds.top);
+    canvas.scale(
+      bounds.width / (crop.width * surface.width),
+      bounds.height / (crop.height * surface.height),
+    );
+    canvas.translate(-crop.left * surface.width, -crop.top * surface.height);
+    surface.paint(canvas, opacity);
+    canvas.restore();
+  }
+
+  void dispose() {
+    surface.dispose();
+  }
+}
+
+abstract interface class _MediaSurface {
+  double get width;
+
+  double get height;
+
+  void paint(ui.Canvas canvas, double opacity);
+
+  void dispose();
+}
+
+class _PreparedMediaSurface implements _MediaSurface {
+  const _PreparedMediaSurface(this.asset, this.part);
+
+  final PreparedAsset asset;
+  final ResolvedRenderPart part;
+
+  @override
+  double get width => asset.size.width;
+
+  @override
+  double get height => asset.size.height;
+
+  @override
+  void paint(ui.Canvas canvas, double opacity) {
+    asset.paint(
+      canvas,
+      part.tintColor,
+      tintStrength: part.tintStrength,
+      opacity: part.opacity * opacity,
+    );
+  }
+
+  @override
+  void dispose() {}
+}
+
+class _ImageMediaSurface implements _MediaSurface {
+  const _ImageMediaSurface(this.image);
+
+  final ui.Image image;
+
+  @override
+  double get width => image.width.toDouble();
+
+  @override
+  double get height => image.height.toDouble();
+
+  @override
+  void paint(ui.Canvas canvas, double opacity) {
+    canvas.drawImage(
+      image,
+      ui.Offset.zero,
+      ui.Paint()
+        ..color = ui.Color.fromARGB((opacity * 255).round(), 255, 255, 255),
+    );
+  }
+
+  @override
+  void dispose() {
+    image.dispose();
+  }
 }
 
 extension _FirstOrNull<T> on List<T> {

@@ -3,5 +3,6 @@ export 'reaction_export_models.dart';
 export 'reaction_export_planner.dart';
 export 'reaction_export_controller.dart';
 export 'reaction_dialogue_selection.dart';
+export 'reaction_media_frame.dart';
 export 'reactify_reaction_state_renderer.dart';
 export 'artifact_writer.dart';

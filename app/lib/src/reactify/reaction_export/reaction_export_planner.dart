@@ -52,6 +52,13 @@ class ReactionExportPlanner {
             request.options.includeDialogue && event.clip.showDialogue;
         final includeMedia =
             request.options.includeMedia && event.clip.showMedia;
+        final mediaFrameIdentity = _mediaFrameIdentity(
+          request: request,
+          timeline: timeline,
+          state: state,
+          includeMedia: includeMedia,
+          event: event,
+        );
         final effective = _effectiveContent(
           request: request,
           timeline: timeline,
@@ -60,6 +67,7 @@ class ReactionExportPlanner {
           characterIds: characterIds,
           includeDialogue: includeDialogue,
           includeMedia: includeMedia,
+          mediaFrameIdentity: mediaFrameIdentity,
         );
         final artifact = _artifactFor(
           request: request,
@@ -69,6 +77,7 @@ class ReactionExportPlanner {
           characterIds: characterIds,
           includeDialogue: includeDialogue,
           includeMedia: includeMedia,
+          mediaFrameIdentity: mediaFrameIdentity,
           effectiveContent: effective,
           artifacts: artifactByKey,
           canonicalByKey: canonicalByKey,
@@ -109,6 +118,12 @@ class ReactionExportPlanner {
     } else {
       for (final state in stateCandidates) {
         final characterIds = _effectiveCharacterIds(request, state);
+        final mediaFrameIdentity = _mediaFrameIdentity(
+          request: request,
+          timeline: timeline,
+          state: state,
+          includeMedia: request.options.includeMedia,
+        );
         final effective = _effectiveContent(
           request: request,
           timeline: timeline,
@@ -116,6 +131,7 @@ class ReactionExportPlanner {
           characterIds: characterIds,
           includeDialogue: request.options.includeDialogue,
           includeMedia: request.options.includeMedia,
+          mediaFrameIdentity: mediaFrameIdentity,
         );
         final artifact = _artifactFor(
           request: request,
@@ -124,6 +140,7 @@ class ReactionExportPlanner {
           characterIds: characterIds,
           includeDialogue: request.options.includeDialogue,
           includeMedia: request.options.includeMedia,
+          mediaFrameIdentity: mediaFrameIdentity,
           effectiveContent: effective,
           artifacts: artifactByKey,
           canonicalByKey: canonicalByKey,
@@ -333,6 +350,7 @@ class ReactionExportPlanner {
     required Iterable<CharacterId> characterIds,
     required bool includeDialogue,
     required bool includeMedia,
+    required String? mediaFrameIdentity,
     ReactionExportEvent? event,
   }) {
     final selected = characterIds.toSet();
@@ -366,6 +384,7 @@ class ReactionExportPlanner {
     final media = includeMedia
         ? {
             'configuration': state.media.toJson(),
+            'frameIdentity': mediaFrameIdentity,
             'asset': _resourceJson(
               request.project.assets[state.media.assetId]?.toJson(),
             ),
@@ -420,6 +439,7 @@ class ReactionExportPlanner {
     required Iterable<CharacterId> characterIds,
     required bool includeDialogue,
     required bool includeMedia,
+    required String? mediaFrameIdentity,
     required String effectiveContent,
     required Map<String, ReactionRenderArtifactPlan> artifacts,
     required Map<String, String> canonicalByKey,
@@ -450,6 +470,7 @@ class ReactionExportPlanner {
           composition: request.options.composition,
           includeDialogue: includeDialogue,
           includeMedia: includeMedia,
+          mediaFrameIdentity: mediaFrameIdentity,
           characterIds: characterIds,
           timeline: timeline,
           event: event,
@@ -464,6 +485,50 @@ class ReactionExportPlanner {
       ..remove('id')
       ..remove('name')
       ..remove('metadata');
+  }
+
+  String? _mediaFrameIdentity({
+    required ReactionExportRequest request,
+    required ProjectTimeline? timeline,
+    required ReactionState state,
+    required bool includeMedia,
+    ReactionExportEvent? event,
+  }) {
+    final media = state.media;
+    final assetId = media.assetId;
+    if (!includeMedia || !media.visible || assetId == null) return null;
+    final asset = request.project.assets[assetId];
+    if (asset == null) {
+      return ReactionContentKey.fromJsonValue({'assetId': assetId}).value;
+    }
+    if (asset.kind != ProjectAssetKind.video) {
+      return ReactionContentKey.fromJsonValue({
+        'assetId': assetId,
+        'contentHash': asset.contentHash,
+        'uri': asset.uri,
+      }).value;
+    }
+    final frame = event?.clip.range.start.frame ?? 0;
+    final timestamp = timeline == null
+        ? 0
+        : _timestampMicroseconds(frame, timeline.frameRate);
+    final canvas = timeline?.canvas ?? request.project.canvasDefaults;
+    final layout = request.project.layouts[state.layoutId];
+    final region = layout?.mediaRegion;
+    return ReactionContentKey.fromJsonValue({
+      'assetId': assetId,
+      'contentHash': asset.contentHash,
+      'uri': asset.uri,
+      'frame': frame,
+      'timestampMicroseconds': timestamp,
+      'eventId': event?.eventId,
+      'targetWidth': region == null
+          ? null
+          : (region.width * canvas.width).ceil(),
+      'targetHeight': region == null
+          ? null
+          : (region.height * canvas.height).ceil(),
+    }).value;
   }
 
   static int _compareManifestEntries(

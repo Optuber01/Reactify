@@ -7,8 +7,11 @@ import 'package:flutter/services.dart';
 import '../commands/commands.dart';
 import '../project/project.dart';
 import '../studio/studio_project_controller.dart';
+import 'media_kit_playback_node.dart';
 import 'project_bin_browser.dart';
 import 'timeline_interval_index.dart';
+import 'timeline_playback_engine.dart';
+import 'timeline_preview.dart';
 import 'timeline_shortcuts.dart';
 
 class TimelineWorkspace extends StatelessWidget {
@@ -39,9 +42,14 @@ class TimelineWorkspace extends StatelessWidget {
 }
 
 class TimelineEditor extends StatefulWidget {
-  const TimelineEditor({super.key, required this.controller});
+  const TimelineEditor({
+    super.key,
+    required this.controller,
+    this.playbackNodeFactory,
+  });
 
   final StudioProjectController controller;
+  final TimelinePlaybackNodeFactory? playbackNodeFactory;
 
   @override
   State<TimelineEditor> createState() => _TimelineEditorState();
@@ -65,12 +73,14 @@ class _TimelineEditorState extends State<TimelineEditor> {
   int _shuttleDirection = 0;
   int _shuttleSpeed = 1;
   int _idSerial = 0;
+  late TimelinePlaybackEngine _playbackEngine;
 
   double get _pixelsPerFrame => 1.2 * _zoom;
 
   @override
   void initState() {
     super.initState();
+    _createPlaybackEngine();
     widget.controller.addListener(_handleProjectChange);
     _headerVerticalController.addListener(_syncFromHeaders);
     _trackVerticalController.addListener(_syncFromTracks);
@@ -83,6 +93,9 @@ class _TimelineEditorState extends State<TimelineEditor> {
       oldWidget.controller.removeListener(_handleProjectChange);
       widget.controller.addListener(_handleProjectChange);
       _selectedClipIds.clear();
+      _replacePlaybackEngine();
+    } else if (oldWidget.playbackNodeFactory != widget.playbackNodeFactory) {
+      _replacePlaybackEngine();
     }
   }
 
@@ -90,6 +103,8 @@ class _TimelineEditorState extends State<TimelineEditor> {
   void dispose() {
     _playbackTimer?.cancel();
     widget.controller.removeListener(_handleProjectChange);
+    _playbackEngine.removeListener(_handlePlaybackChange);
+    unawaited(_playbackEngine.close());
     _headerVerticalController
       ..removeListener(_syncFromHeaders)
       ..dispose();
@@ -133,10 +148,18 @@ class _TimelineEditorState extends State<TimelineEditor> {
             color: const Color(0xFF0D1017),
             child: Column(
               children: [
+                SizedBox(
+                  height: 190,
+                  child: TimelinePreview(
+                    engine: _playbackEngine,
+                    timeline: timeline,
+                  ),
+                ),
+                const Divider(height: 1),
                 _TransportBar(
                   timeline: timeline,
                   playheadFrame: widget.controller.playheadFrame,
-                  playing: _shuttleDirection != 0,
+                  playing: _playbackEngine.isPlaying || _shuttleDirection != 0,
                   shuttleDirection: _shuttleDirection,
                   shuttleSpeed: _shuttleSpeed,
                   snapping: _snapping,
@@ -300,7 +323,43 @@ class _TimelineEditorState extends State<TimelineEditor> {
   }
 
   void _handleProjectChange() {
+    _playbackEngine.updateProject(
+      project: widget.controller.project,
+      timeline: widget.controller.selectedTimeline,
+      frame: widget.controller.playheadFrame,
+      projectLocation: widget.controller.projectLocation,
+    );
     if (mounted) setState(() {});
+  }
+
+  void _handlePlaybackChange() {
+    if (mounted) setState(() {});
+  }
+
+  void _createPlaybackEngine() {
+    _playbackEngine = TimelinePlaybackEngine(
+      project: widget.controller.project,
+      timeline: widget.controller.selectedTimeline,
+      initialFrame: widget.controller.playheadFrame,
+      projectLocation: widget.controller.projectLocation,
+      nodeFactory:
+          widget.playbackNodeFactory ??
+          const MediaKitTimelinePlaybackNodeFactory(),
+      onFrameChanged: _handlePlaybackFrame,
+    )..addListener(_handlePlaybackChange);
+  }
+
+  void _replacePlaybackEngine() {
+    final previous = _playbackEngine;
+    previous.removeListener(_handlePlaybackChange);
+    unawaited(previous.close());
+    _createPlaybackEngine();
+  }
+
+  void _handlePlaybackFrame(int frame) {
+    if (widget.controller.playheadFrame != frame) {
+      widget.controller.setPlayhead(frame);
+    }
   }
 
   void _syncFromHeaders() =>
@@ -620,14 +679,19 @@ class _TimelineEditorState extends State<TimelineEditor> {
   }
 
   void _setPlayheadFromPixels(double pixels, ProjectTimeline timeline) {
-    widget.controller.setPlayhead(
-      (pixels / _pixelsPerFrame).round().clamp(0, timeline.durationFrames - 1),
+    unawaited(
+      _playbackEngine.seekFrame(
+        (pixels / _pixelsPerFrame).round().clamp(
+          0,
+          timeline.durationFrames - 1,
+        ),
+      ),
     );
   }
 
   void _stepFrame(int delta) {
     _stopPlayback();
-    widget.controller.setPlayhead(widget.controller.playheadFrame + delta);
+    unawaited(_playbackEngine.stepFrame(delta));
   }
 
   void _togglePlayback() {
@@ -651,6 +715,11 @@ class _TimelineEditorState extends State<TimelineEditor> {
       _shuttleDirection = direction;
       _shuttleSpeed = speed;
     });
+    if (direction == 1 && speed == 1) {
+      unawaited(_playbackEngine.play());
+      return;
+    }
+    unawaited(_playbackEngine.pause());
     final frameRate =
         widget.controller.selectedTimeline.frameRate.framesPerSecond;
     _playbackTimer = Timer.periodic(const Duration(milliseconds: 33), (_) {
@@ -672,6 +741,7 @@ class _TimelineEditorState extends State<TimelineEditor> {
   void _stopPlayback() {
     _playbackTimer?.cancel();
     _playbackTimer = null;
+    unawaited(_playbackEngine.pause());
     if (mounted && (_shuttleDirection != 0 || _shuttleSpeed != 1)) {
       setState(() {
         _shuttleDirection = 0;
@@ -895,6 +965,7 @@ class _TrackHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final audio = track.type == TimelineTrackType.audio;
+    final audible = audio || track.type == TimelineTrackType.video;
     return Container(
       decoration: const BoxDecoration(
         color: Color(0xFF111620),
@@ -925,7 +996,7 @@ class _TrackHeader extends StatelessWidget {
               onPressed: () =>
                   onChanged(track.copyWith(visible: !track.visible)),
             ),
-          if (audio) ...[
+          if (audible) ...[
             _SmallTrackButton(
               tooltip: track.muted ? 'Unmute track' : 'Mute track',
               label: 'M',

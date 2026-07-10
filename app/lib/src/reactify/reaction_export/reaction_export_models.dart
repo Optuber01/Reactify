@@ -198,6 +198,7 @@ class ReactionRenderRequest {
     required this.includeDialogue,
     required this.includeMedia,
     required Iterable<CharacterId> characterIds,
+    this.mediaFrameIdentity,
     this.timeline,
     this.event,
   }) : characterIds = Set.unmodifiable(characterIds);
@@ -209,6 +210,7 @@ class ReactionRenderRequest {
   final bool includeDialogue;
   final bool includeMedia;
   final Set<CharacterId> characterIds;
+  final String? mediaFrameIdentity;
   final ProjectTimeline? timeline;
   final ReactionExportEvent? event;
 }

@@ -1,24 +1,44 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 
 import '../commands/commands.dart';
+import '../io/io.dart';
 import '../project/project.dart';
 
 class StudioProjectController extends ChangeNotifier {
-  StudioProjectController({ReactifyProjectDocument? initialProject})
-    : _store = ProjectCommandStore(
-        initialProject ?? buildReactionStudioTemplate(),
-      ) {
+  StudioProjectController({
+    ReactifyProjectDocument? initialProject,
+    ProjectRepository? repository,
+    this.autosaveDelay = const Duration(seconds: 20),
+  }) : repository = repository ?? createProjectRepository(),
+       _store = ProjectCommandStore(
+         initialProject ?? buildReactionStudioTemplate(),
+       ) {
     _store.addListener(_handleStoreChange);
     selectedTimelineId = _store.project.timelines.keys.first;
     selectedReactionStateId = _store.project.reactionStates.keys.first;
   }
 
-  final ProjectCommandStore _store;
+  ProjectCommandStore _store;
+  final ProjectRepository repository;
+  final Duration autosaveDelay;
   late TimelineId selectedTimelineId;
   late ReactionStateId selectedReactionStateId;
   int playheadFrame = 0;
   int _stateSerial = 0;
+  int _timelineSerial = 0;
+  Timer? _autosaveTimer;
+  String? _cleanProjectJson;
   ProjectChangeSummary? lastChange;
+  String? projectLocation;
+  bool isBusy = false;
+  String workspaceStatus = 'Unsaved project';
+  ProjectLoadSource? lastLoadSource;
+  ProjectSaveMetadata? lastSaveMetadata;
+  ProjectSaveMetadata? lastAutosaveMetadata;
+  List<MissingMediaDiagnostic> missingMedia = const [];
 
   ReactifyProjectDocument get project => _store.project;
   ProjectTimeline get selectedTimeline =>
@@ -28,6 +48,296 @@ class StudioProjectController extends ChangeNotifier {
   bool get canUndo => _store.canUndo;
   bool get canRedo => _store.canRedo;
   bool get hasActiveDraft => _store.hasActiveDraft;
+  bool get isDirty =>
+      _cleanProjectJson == null ||
+      project.toDeterministicJson() != _cleanProjectJson;
+  bool get canSave => projectLocation != null && !isBusy;
+  bool get recoveredProject =>
+      lastLoadSource == ProjectLoadSource.backup ||
+      lastLoadSource == ProjectLoadSource.autosave;
+
+  void newProject({String name = 'Untitled Project'}) {
+    final slug = _slug(name);
+    final next = buildReactionStudioTemplate().copyWith(
+      id: 'project.$slug.${DateTime.now().millisecondsSinceEpoch}',
+      name: name.trim().isEmpty ? 'Untitled Project' : name.trim(),
+      metadata: const {'template': 'reaction-studio'},
+    );
+    _installProject(next);
+    projectLocation = null;
+    _cleanProjectJson = null;
+    lastLoadSource = null;
+    lastSaveMetadata = null;
+    lastAutosaveMetadata = null;
+    missingMedia = const [];
+    workspaceStatus = 'New unsaved project';
+    notifyListeners();
+  }
+
+  Future<ProjectLoadResult> openProject(String location) async {
+    return _withBusy(() async {
+      final result = await repository.load(location);
+      final recovered =
+          result.source == ProjectLoadSource.backup ||
+          result.source == ProjectLoadSource.autosave;
+      _installLoadedProject(result, clean: !recovered);
+      workspaceStatus = recovered
+          ? 'Recovered ${result.source.name} copy'
+          : 'Project opened';
+      return result;
+    });
+  }
+
+  Future<ProjectRecoveryResult> recoverProject(String location) async {
+    return _withBusy(() async {
+      final recovery = await repository.recover(location);
+      _installLoadedProject(recovery.loadResult, clean: false);
+      workspaceStatus = 'Recovery loaded; save to keep it';
+      return recovery;
+    });
+  }
+
+  Future<ProjectSaveResult> saveProject() async {
+    final location = projectLocation;
+    if (location == null) {
+      throw const ProjectRepositoryException(
+        'Choose a project location before saving.',
+      );
+    }
+    return saveProjectAs(location);
+  }
+
+  Future<ProjectSaveResult> saveProjectAs(String location) async {
+    return _withBusy(() async {
+      final savingProject = project;
+      final result = await repository.save(savingProject, location);
+      projectLocation = location;
+      _cleanProjectJson = savingProject.toDeterministicJson();
+      lastSaveMetadata = result.metadata;
+      lastLoadSource = ProjectLoadSource.primary;
+      _autosaveTimer?.cancel();
+      if (isDirty) {
+        workspaceStatus = 'Newer changes remain unsaved';
+        _scheduleAutosave();
+      } else {
+        workspaceStatus = 'Saved';
+      }
+      return result;
+    });
+  }
+
+  Future<ProjectAutosaveResult?> autosaveNow() async {
+    final location = projectLocation;
+    if (location == null || !isDirty || isBusy) return null;
+    final result = await repository.autosave(project, location);
+    lastAutosaveMetadata = result.metadata;
+    workspaceStatus = 'Autosaved recovery copy';
+    notifyListeners();
+    return result;
+  }
+
+  void relinkMissingMedia(Map<AssetId, String> replacements) {
+    final location = projectLocation;
+    if (location == null) {
+      throw const ProjectRepositoryException(
+        'Save the project before relinking media.',
+      );
+    }
+    if (replacements.isEmpty) return;
+    final batch = const ProjectRelinkPlanner().prepare(
+      project: project,
+      projectLocation: location,
+      replacements: replacements,
+    );
+    _store.executeBatch(batch);
+    missingMedia = List.unmodifiable(
+      missingMedia.where(
+        (diagnostic) => !replacements.containsKey(diagnostic.assetId),
+      ),
+    );
+    workspaceStatus = 'Media relinked';
+    notifyListeners();
+  }
+
+  TimelineId createTimeline({String name = 'New Timeline'}) {
+    _timelineSerial += 1;
+    final id = _uniqueTimelineId('${_slug(name)}.$_timelineSerial');
+    final source = selectedTimeline;
+    final tracks = <TrackId, TimelineTrack>{};
+    final trackOrder = <TrackId>[];
+    for (var index = 0; index < source.trackOrder.length; index += 1) {
+      final sourceTrack = source.tracks[source.trackOrder[index]]!;
+      final trackId = '$id.track.${index + 1}';
+      trackOrder.add(trackId);
+      tracks[trackId] = sourceTrack.copyWith(
+        id: trackId,
+        order: index,
+        clipOrder: const [],
+        clips: const {},
+      );
+    }
+    final timeline = ProjectTimeline(
+      id: id,
+      name: name.trim().isEmpty ? 'New Timeline' : name.trim(),
+      canvas: source.canvas,
+      frameRate: source.frameRate,
+      durationFrames: source.durationFrames,
+      trackOrder: trackOrder,
+      tracks: tracks,
+    );
+    _store.execute(
+      UpsertProjectEntityCommand(
+        kind: ProjectEntityKind.timeline,
+        entity: timeline,
+      ),
+    );
+    selectTimeline(id);
+    return id;
+  }
+
+  void renameTimeline(TimelineId id, String name) {
+    final timeline = project.timelines[id];
+    if (timeline == null) {
+      throw ProjectCommandException('Timeline $id does not exist.');
+    }
+    final trimmed = name.trim();
+    if (trimmed.isEmpty || trimmed == timeline.name) return;
+    _store.execute(
+      UpsertProjectEntityCommand(
+        kind: ProjectEntityKind.timeline,
+        entity: timeline.copyWith(name: trimmed),
+      ),
+    );
+  }
+
+  TimelineId duplicateTimeline(TimelineId id, {String? name}) {
+    final source = project.timelines[id];
+    if (source == null) {
+      throw ProjectCommandException('Timeline $id does not exist.');
+    }
+    _timelineSerial += 1;
+    final newId = _uniqueTimelineId(
+      '${_slug(source.name)}.copy.$_timelineSerial',
+    );
+    _store.execute(
+      DuplicateTimelineCommand(
+        sourceTimelineId: id,
+        newTimelineId: newId,
+        newName: name?.trim().isNotEmpty == true
+            ? name!.trim()
+            : '${source.name} Copy',
+      ),
+    );
+    selectTimeline(newId);
+    return newId;
+  }
+
+  void deleteTimeline(TimelineId id) {
+    if (project.timelines.length == 1) {
+      throw const ProjectCommandException(
+        'A project must contain at least one timeline.',
+      );
+    }
+    _store.execute(
+      RemoveProjectEntityCommand(
+        kind: ProjectEntityKind.timeline,
+        entityId: id,
+      ),
+    );
+  }
+
+  TimelineId importTimelineJson(String source) {
+    final decoded = jsonDecode(source);
+    final timeline = ProjectTimeline.fromJson(jsonMap(decoded));
+    if (project.timelines.containsKey(timeline.id)) {
+      throw ProjectCommandException(
+        'Timeline ${timeline.id} already exists in this project.',
+      );
+    }
+    _store.execute(
+      UpsertProjectEntityCommand(
+        kind: ProjectEntityKind.timeline,
+        entity: timeline,
+      ),
+    );
+    selectTimeline(timeline.id);
+    return timeline.id;
+  }
+
+  String exportTimelineJson([TimelineId? id]) {
+    final timeline = project.timelines[id ?? selectedTimelineId];
+    if (timeline == null) {
+      throw ProjectCommandException(
+        'Timeline ${id ?? selectedTimelineId} does not exist.',
+      );
+    }
+    return '${const JsonEncoder.withIndent('  ').convert(canonicalJsonMap(timeline.toJson()))}\n';
+  }
+
+  Future<T> _withBusy<T>(Future<T> Function() operation) async {
+    if (isBusy) {
+      throw const ProjectRepositoryException(
+        'Another project operation is already running.',
+      );
+    }
+    isBusy = true;
+    workspaceStatus = 'Working';
+    notifyListeners();
+    try {
+      return await operation();
+    } catch (_) {
+      workspaceStatus = 'Operation failed';
+      rethrow;
+    } finally {
+      isBusy = false;
+      notifyListeners();
+    }
+  }
+
+  void _installLoadedProject(ProjectLoadResult result, {required bool clean}) {
+    _installProject(result.project);
+    projectLocation = result.location;
+    _cleanProjectJson = clean ? result.project.toDeterministicJson() : null;
+    lastLoadSource = result.source;
+    lastSaveMetadata = null;
+    lastAutosaveMetadata = null;
+    missingMedia = List.unmodifiable(result.missingMedia);
+  }
+
+  void _installProject(ReactifyProjectDocument next) {
+    _autosaveTimer?.cancel();
+    _store.removeListener(_handleStoreChange);
+    _store = ProjectCommandStore(next);
+    _store.addListener(_handleStoreChange);
+    selectedTimelineId = next.timelines.keys.first;
+    selectedReactionStateId = next.reactionStates.keys.first;
+    playheadFrame = 0;
+    lastChange = null;
+  }
+
+  TimelineId _uniqueTimelineId(String stem) {
+    final prefix = 'timeline.$stem';
+    var candidate = prefix;
+    var suffix = 2;
+    while (project.timelines.containsKey(candidate)) {
+      candidate = '$prefix.$suffix';
+      suffix += 1;
+    }
+    return candidate;
+  }
+
+  void _scheduleAutosave() {
+    _autosaveTimer?.cancel();
+    if (projectLocation == null || !isDirty) return;
+    _autosaveTimer = Timer(autosaveDelay, () async {
+      try {
+        await autosaveNow();
+      } catch (_) {
+        workspaceStatus = 'Autosave failed';
+        notifyListeners();
+      }
+    });
+  }
 
   ProjectChangeSummary executeCommand(ProjectCommand command) {
     return _store.execute(command);
@@ -209,6 +519,8 @@ class StudioProjectController extends ChangeNotifier {
   ) {
     lastChange = summary;
     _repairSelection();
+    workspaceStatus = isDirty ? 'Unsaved changes' : 'All changes saved';
+    _scheduleAutosave();
     notifyListeners();
   }
 
@@ -224,9 +536,19 @@ class StudioProjectController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _autosaveTimer?.cancel();
     _store.removeListener(_handleStoreChange);
     super.dispose();
   }
+}
+
+String _slug(String value) {
+  final normalized = value
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp('[^a-z0-9]+'), '-')
+      .replaceAll(RegExp('(^-+|-+\$)'), '');
+  return normalized.isEmpty ? 'untitled' : normalized;
 }
 
 ReactifyProjectDocument buildReactionStudioTemplate() {

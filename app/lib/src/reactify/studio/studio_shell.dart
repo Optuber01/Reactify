@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../gacha/ui/character_creator_screen.dart';
+import 'project_workspace_bar.dart';
 import 'reaction_composer.dart';
 import 'studio_project_controller.dart';
 import '../text/reaction_text_editor.dart';
@@ -76,35 +77,36 @@ class _ReactifyStudioShellState extends State<ReactifyStudioShell> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final content = IndexedStack(index: _selectedIndex, children: pages);
-        if (constraints.maxWidth < 720) {
-          return Scaffold(
-            body: SafeArea(bottom: false, child: content),
-            bottomNavigationBar: NavigationBar(
-              selectedIndex: _selectedIndex,
-              destinations: _destinations,
-              onDestinationSelected: _select,
-            ),
-          );
-        }
+        final compact = constraints.maxWidth < 720;
         return Scaffold(
-          body: Row(
-            children: [
-              NavigationRail(
-                selectedIndex: _selectedIndex,
-                destinations: _railDestinations,
-                onDestinationSelected: _select,
-                labelType: constraints.maxWidth >= 1100
-                    ? NavigationRailLabelType.all
-                    : NavigationRailLabelType.selected,
-                leading: const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 18),
-                  child: _ReactifyMark(),
+          appBar: StudioWorkspaceBar(controller: _projectController),
+          body: compact
+              ? SafeArea(bottom: false, child: content)
+              : Row(
+                  children: [
+                    NavigationRail(
+                      selectedIndex: _selectedIndex,
+                      destinations: _railDestinations,
+                      onDestinationSelected: _select,
+                      labelType: constraints.maxWidth >= 1100
+                          ? NavigationRailLabelType.all
+                          : NavigationRailLabelType.selected,
+                      leading: const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 18),
+                        child: _ReactifyMark(),
+                      ),
+                    ),
+                    const VerticalDivider(width: 1),
+                    Expanded(child: content),
+                  ],
                 ),
-              ),
-              const VerticalDivider(width: 1),
-              Expanded(child: content),
-            ],
-          ),
+          bottomNavigationBar: compact
+              ? NavigationBar(
+                  selectedIndex: _selectedIndex,
+                  destinations: _destinations,
+                  onDestinationSelected: _select,
+                )
+              : null,
         );
       },
     );

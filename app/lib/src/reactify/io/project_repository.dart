@@ -204,9 +204,6 @@ class ProjectMediaDiagnostics {
         );
         continue;
       }
-      if (uriPolicy.isExternal(asset.uri)) {
-        continue;
-      }
       final resolved = uriPolicy.resolve(
         projectLocation: projectLocation,
         storedUri: asset.uri,
@@ -220,6 +217,9 @@ class ProjectMediaDiagnostics {
             reason: MissingMediaReason.declaredMissing,
           ),
         );
+        continue;
+      }
+      if (uriPolicy.isExternal(asset.uri)) {
         continue;
       }
       if (!await probe.exists(resolved)) {

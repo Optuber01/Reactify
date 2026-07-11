@@ -40,3 +40,6 @@
 /.assetmap/
 /nul
 .gemini/
+
+# Keep local documentation and planning files out of Git
+*.md

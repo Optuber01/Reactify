@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ui' as ui;
 
 import 'package:flutter/services.dart';
@@ -58,6 +59,91 @@ class ReactifySvgExporter {
     : assetLoader = assetLoader ?? rootBundle;
 
   final AssetBundle assetLoader;
+
+  Future<String> exportResolvedScene(
+    ResolvedScene scene,
+    ui.Size canvasSize, {
+    ui.Color? backgroundColor,
+  }) async {
+    final dataUriByPath = <String, String>{};
+    for (final path in scene.assets.keys) {
+      try {
+        final data = await assetLoader.load(path);
+        final mediaType = path.toLowerCase().endsWith('.svg')
+            ? 'image/svg+xml'
+            : 'image/png';
+        dataUriByPath[path] =
+            'data:$mediaType;base64,${base64Encode(data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes))}';
+      } on Object catch (error) {
+        throw StateError('Unable to embed SVG export asset $path: $error');
+      }
+    }
+    final tintIds = <int, String>{};
+    for (final part in scene.parts) {
+      final tint = part.tintColor;
+      if (tint != null) {
+        tintIds.putIfAbsent(tint.toARGB32(), () => 'tint${tintIds.length}');
+      }
+    }
+    final buffer = StringBuffer()
+      ..writeln(
+        '<svg xmlns="http://www.w3.org/2000/svg" '
+        'width="${_num(canvasSize.width)}" '
+        'height="${_num(canvasSize.height)}" '
+        'viewBox="0 0 ${_num(canvasSize.width)} ${_num(canvasSize.height)}">',
+      );
+    if (tintIds.isNotEmpty) {
+      buffer.writeln('<defs>');
+      for (final entry in tintIds.entries) {
+        final color = ui.Color(entry.key);
+        buffer
+          ..writeln(
+            '<filter id="${entry.value}" color-interpolation-filters="sRGB">',
+          )
+          ..writeln(
+            '<feFlood flood-color="${_svgColor(color)}" '
+            'flood-opacity="${_num(color.a)}" result="color" />',
+          )
+          ..writeln(
+            '<feComposite in="color" in2="SourceAlpha" operator="in" />',
+          )
+          ..writeln('</filter>');
+      }
+      buffer.writeln('</defs>');
+    }
+    if (backgroundColor != null) {
+      buffer.writeln(
+        '<rect width="100%" height="100%" '
+        'fill="${_svgColor(backgroundColor)}" '
+        'fill-opacity="${_num(backgroundColor.a)}" />',
+      );
+    }
+    for (var index = 0; index < scene.parts.length; index++) {
+      final part = scene.parts[index];
+      final asset = scene.assets[part.catalogPart.appAssetPath];
+      if (asset == null) {
+        continue;
+      }
+      final tint = part.tintColor;
+      final filter = tint == null
+          ? ''
+          : ' filter="url(#${tintIds[tint.toARGB32()]})"';
+      buffer.writeln(
+        '<image id="part$index" href="${_xml(dataUriByPath[part.catalogPart.appAssetPath]!)}" '
+        'width="${_num(asset.size.width)}" height="${_num(asset.size.height)}" '
+        'transform="${_matrix(part.localTransform)}"$filter />',
+      );
+    }
+    buffer.writeln('</svg>');
+    return buffer.toString();
+  }
+
+  static String _svgColor(ui.Color color) {
+    final red = (color.r * 255).round().toRadixString(16).padLeft(2, '0');
+    final green = (color.g * 255).round().toRadixString(16).padLeft(2, '0');
+    final blue = (color.b * 255).round().toRadixString(16).padLeft(2, '0');
+    return '#$red$green$blue';
+  }
 
   String exportScene(
     ReactifySceneDocument scene,
@@ -528,10 +614,6 @@ class ReactifyPngExporter {
       }
       canvas.save();
       canvas.transform(part.localTransform.toFloat64List());
-      canvas.translate(
-        part.catalogPart.runtimeAnchorX,
-        part.catalogPart.runtimeAnchorY,
-      );
       asset.paint(canvas, part.tintColor);
       canvas.restore();
     }

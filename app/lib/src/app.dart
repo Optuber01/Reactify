@@ -1,28 +1,30 @@
 import 'package:flutter/material.dart';
 
-import 'gacha/ui/character_creator_screen.dart';
+import 'reactify/ui/reactify_studio_screen.dart';
 
 class ReactifyGachaApp extends StatelessWidget {
   const ReactifyGachaApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    const ivory = Color(0xFFF6F3EA);
-    const inkBlue = Color(0xFF254B73);
+    const paper = Color(0xFFECE9DF);
+    const ink = Color(0xFF171A19);
+    const signal = Color(0xFFD4FF32);
     return MaterialApp(
-      title: 'Reactify Gacha Renderer',
+      title: 'Reactify Gacha Studio',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: inkBlue,
+          seedColor: signal,
           brightness: Brightness.light,
-          primary: inkBlue,
-          surface: ivory,
+          primary: ink,
+          surface: paper,
         ),
-        scaffoldBackgroundColor: ivory,
+        scaffoldBackgroundColor: paper,
+        fontFamily: 'Bahnschrift',
         useMaterial3: true,
       ),
-      home: const CharacterCreatorScreen(),
+      home: const ReactifyStudioScreen(),
     );
   }
 }
